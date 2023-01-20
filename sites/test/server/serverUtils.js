@@ -918,9 +918,12 @@ var _getTemplateComponents = function (templateName, includeThemeComps) {
 		});
 	};
 	for (var i = 0; i < pages.length; i++) {
-		var pagepath = path.join(tempSrcDir, 'pages', pages[i]),
-			pagestr = fs.readFileSync(pagepath),
-			pagejson = JSON.parse(pagestr);
+		var pagepath = path.join(tempSrcDir, 'pages', pages[i])
+		if (pagepath.includes('.DS_Store')) {
+			continue;
+		}
+		var pagestr = fs.readFileSync(pagepath)
+		var pagejson = JSON.parse(pagestr)
 		if (pagejson.componentInstances) {
 			processInstances(pagejson.componentInstances);
 		}
