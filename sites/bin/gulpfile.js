@@ -706,12 +706,24 @@ gulp.task('list-trash', function (done) {
 });
 
 /**
- * list Trash
+ * delete from Trash
  */
 gulp.task('delete-trash', function (done) {
 	'use strict';
 	_readLoggerLevel(argv.projectDir);
 	doclib.deleteTrash(argv, function (success) {
+		process.exitCode = _getExitCode(success);
+		done();
+	});
+});
+
+/**
+ * restore from Trash
+ */
+gulp.task('restore-trash', function (done) {
+	'use strict';
+	_readLoggerLevel(argv.projectDir);
+	doclib.restoreTrash(argv, function (success) {
 		process.exitCode = _getExitCode(success);
 		done();
 	});
@@ -1534,6 +1546,9 @@ gulp.task('copy-libs', function (done) {
 		// Rename @oracle/oraclejet to oraclejet
 		libs[libs.findIndex(element => element === '@oracle/oraclejet')] = 'oraclejet';
 
+		// Rename @oracle/oraclejet-preact to oraclejet-preact
+		libs[libs.findIndex(element => element === '@oracle/oraclejet-preact')] = 'oraclejet-preact';
+
 		// Rename @oracle/oraclejet/node_modules/jquery-ui to jquery-ui
 		libs[libs.findIndex(element => element === '@oracle/oraclejet/node_modules/jquery-ui')] = 'jquery-ui';
 
@@ -1617,6 +1632,18 @@ gulp.task('create-site', function (done) {
 	'use strict';
 	_readLoggerLevel(argv.projectDir);
 	sitelib.createSite(argv, function (success) {
+		process.exitCode = _getExitCode(success);
+		done();
+	});
+});
+
+/**
+ * Create new site page
+ */
+gulp.task('create-site-page', function (done) {
+	'use strict';
+	_readLoggerLevel(argv.projectDir);
+	sitelib.createSitePage(argv, function (success) {
 		process.exitCode = _getExitCode(success);
 		done();
 	});
@@ -1738,6 +1765,18 @@ gulp.task('describe-site', function (done) {
 	'use strict';
 	_readLoggerLevel(argv.projectDir);
 	sitelib.describeSite(argv, function (success) {
+		process.exitCode = _getExitCode(success);
+		done();
+	});
+});
+
+/**
+ * Describe site page
+ */
+gulp.task('describe-site-page', function (done) {
+	'use strict';
+	_readLoggerLevel(argv.projectDir);
+	sitelib.describeSitePage(argv, function (success) {
 		process.exitCode = _getExitCode(success);
 		done();
 	});
@@ -2162,6 +2201,18 @@ gulp.task('delete-editorial-role', function (done) {
 	'use strict';
 	_readLoggerLevel(argv.projectDir);
 	assetlib.deleteEditorialRole(argv, function (success) {
+		process.exitCode = _getExitCode(success);
+		done();
+	});
+});
+
+/**
+ * Transfer an Editorial Role
+ */
+gulp.task('transfer-editorial-role', function (done) {
+	'use strict';
+	_readLoggerLevel(argv.projectDir);
+	assetlib.transferEditorialRole(argv, function (success) {
 		process.exitCode = _getExitCode(success);
 		done();
 	});

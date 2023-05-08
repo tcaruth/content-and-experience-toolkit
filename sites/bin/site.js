@@ -25,7 +25,8 @@ var gulp = require('gulp'),
 var console = require('../test/server/logger.js').console;
 
 var cecDir = path.join(__dirname, ".."),
-	themesDataDir = path.join(cecDir, 'data', 'themes');
+	themesDataDir = path.join(cecDir, 'data', 'themes'),
+	exportSiteFileGroupSize = 3;
 
 var projectDir,
 	documentsSrcDir,
@@ -57,9 +58,28 @@ var _cmdEnd = function (done, success) {
 	}
 };
 
+var _executeGetExportService = function (args) {
+	var server = args.server,
+		url = args.endpoint,
+		noMsg = args.noMsg;
+
+	// Note: Export service on dev instances requires additional header
+	var addheaders;
+	if (server.env === 'dev_ec') {
+		addheaders = { 'IDCS_REMOTE_USER': server.username };
+	}
+
+	return serverRest.executeGet({
+		server: server,
+		endpoint: url,
+		noMsg: noMsg,
+		headers: addheaders
+	});
+};
+
 var _downloadReport = function (url, siteName, server) {
 	return new Promise(function (resolve, reject) {
-		console.info('   Download reports from ' + url);
+		console.info(' - Download reports from ' + url);
 		var targetStem,
 			namePrefix;
 
@@ -78,11 +98,18 @@ var _downloadReport = function (url, siteName, server) {
 		});
 
 		targetPath = path.join(targetPath, namePrefix + siteName + '_Report.zip');
-		console.info('   Save reports to ' + targetPath);
+		console.info(' - Save reports to ' + targetPath);
+		// Note: Export service on dev instances requires additional header
+		var addheaders;
+		if (server.env === 'dev_ec') {
+			addheaders = { 'IDCS_REMOTE_USER': server.username };
+		}
+
 		var downloadArgs = {
 			server: server,
 			url: url,
-			saveTo: targetPath
+			saveTo: targetPath,
+			headers: addheaders
 		}
 		serverRest.downloadByURLSave(downloadArgs).then(function () {
 			resolve();
@@ -106,7 +133,7 @@ var _getSiteForExportJob = function (id, server) {
 		var url = '/system/export/api/v1/exports/' + id;
 		url += '?fields=sources.select.type,sources.select.site.id';
 
-		serverRest.executeGet({
+		_executeGetExportService({
 			server: server,
 			endpoint: url,
 			noMsg: true
@@ -142,7 +169,7 @@ var _getSiteForImportJob = function (id, server) {
 		var url = '/system/export/api/v1/imports/' + id;
 		url += '?fields=targets.select.type,targets.select.site.id,targets.select.site.name';
 
-		serverRest.executeGet({
+		_executeGetExportService({
 			server: server,
 			endpoint: url,
 			noMsg: true
@@ -1623,6 +1650,611 @@ var _transferStandardSite = function (argv, server, destServer, site, excludecom
 	});
 };
 
+var _createPageId = function (server, idcToken, siteName, pageLayout) {
+	return new Promise(function (resolve, reject) {
+
+		var url = '/documents/integration?IdcService=SCS_CREATE_NEW_PAGES&IsJson=1';
+
+		var payload = {
+			'idcToken': idcToken,
+			'LocalData': {
+				'IdcService': 'SCS_CREATE_NEW_PAGES',
+				'siteId': siteName,
+				'layouts': pageLayout,
+			}
+		};
+
+		serverRest.executePost({
+			server: server,
+			endpoint: url,
+			body: payload,
+			noMsg: true
+		}).then(function (result) {
+			return resolve(result);
+		});
+
+	});
+};
+
+/**
+ * create site page
+ */
+module.exports.createSitePage = function (argv, done) {
+	'use strict';
+
+	if (!verifyRun(argv)) {
+		done();
+		return;
+	}
+
+	var serverName = argv.server;
+	var server = serverUtils.verifyServer(serverName, projectDir);
+	if (!server || !server.valid) {
+		done();
+		return;
+	}
+
+	//
+	// validate page template JSON file
+	//
+	var pageJsonFilePath = argv.pagetemplate;
+	if (!path.isAbsolute(pageJsonFilePath)) {
+		pageJsonFilePath = path.join(projectDir, pageJsonFilePath);
+	}
+	pageJsonFilePath = path.resolve(pageJsonFilePath);
+	if (!fs.existsSync(pageJsonFilePath)) {
+		console.error('ERROR: ' + pageJsonFilePath + ' does not exist');
+		done();
+		return;
+	}
+	if (!fs.statSync(pageJsonFilePath).isFile()) {
+		console.error('ERROR: ' + pageJsonFilePath + ' is not a file');
+		done();
+		return;
+	}
+	var pageJson;
+	try {
+		pageJson = JSON.parse(fs.readFileSync(pageJsonFilePath));
+	} catch (e) {
+		console.error('ERROR: file ' + pageJsonFilePath + ' is not a valid JSON file');
+		done();
+		return;
+	}
+	if (!pageJson.properties || !pageJson.properties.pageLayout) {
+		console.error('ERROR: file ' + pageJsonFilePath + ' is not a valid page template');
+		done();
+		return;
+	}
+	var pageLayout = pageJson.properties.pageLayout;
+
+	//
+	// validate page details
+	//
+	var pageDetailsFilePath = argv.pagedetails;
+	if (!path.isAbsolute(pageDetailsFilePath)) {
+		pageDetailsFilePath = path.join(projectDir, pageDetailsFilePath);
+	}
+	pageDetailsFilePath = path.resolve(pageDetailsFilePath);
+	if (!fs.existsSync(pageDetailsFilePath)) {
+		console.error('ERROR: ' + pageDetailsFilePath + ' does not exist');
+		done();
+		return;
+	}
+	if (!fs.statSync(pageDetailsFilePath).isFile()) {
+		console.error('ERROR: ' + pageDetailsFilePath + ' is not a file');
+		done();
+		return;
+	}
+	var pageDetails;
+	try {
+		pageDetails = JSON.parse(fs.readFileSync(pageDetailsFilePath));
+	} catch (e) {
+		console.error('ERROR: file ' + pageDetailsFilePath + ' is not a valid JSON file');
+		done();
+		return;
+	}
+	if (!pageDetails.name) {
+		console.error('ERROR: no name is defined in file ' + pageDetailsFilePath);
+	}
+	if (!pageDetails.pageUrl) {
+		console.error('ERROR: no pageUrl is defined in file ' + pageDetailsFilePath);
+	}
+	if (!pageDetails.name || !pageDetails.pageUrl) {
+		done();
+		return;
+	}
+
+	var pageName = pageDetails.name;
+	var pageUrl = pageDetails.pageUrl;
+
+	var siteName = argv.name;
+	var parentId = argv.parent;
+	var siblingId = argv.sibling;
+
+	var ignoreValidation = typeof argv.ignorevalidation === 'string' && argv.ignorevalidation.toLowerCase() === 'true';
+
+	serverUtils.loginToServer(server)
+		.then(function (result) {
+			if (!result.status) {
+				console.error(result.statusMessage);
+				done();
+				return;
+			}
+
+			var idcToken;
+			var site;
+			var channel;
+			var repository;
+			var structureFileId;
+			var pagesFileId;
+			var siteStructure;
+			var realParent;
+			var realSibling;
+			var pageId;
+			var repoContentTypes = [];
+			var componentsUsed = [];
+			var itemsUsed = [];
+			var typesUsed = [];
+			var siteUsedData = [];
+			var components = [];
+			var items = [];
+
+			// verify site on source server
+			sitesRest.getSite({
+				server: server,
+				name: siteName,
+				expand: 'channel,repository'
+			})
+				.then(function (result) {
+					if (!result || result.err || !result.id) {
+						return Promise.reject();
+					}
+
+					site = result;
+					channel = site.channel;
+
+					// get site repository (to get types)
+					return serverRest.getRepository({
+						server: server,
+						id: site.repository && site.repository.id
+					});
+
+				})
+				.then(function (result) {
+					if (!result || result.err) {
+						return Promise.reject();
+					}
+					repository = result;
+					if (repository.contentTypes && repository.contentTypes.length > 0) {
+						repository.contentTypes.forEach(function (type) {
+							if (type.name && !repoContentTypes.includes(type.name)) {
+								repoContentTypes.push(type.name);
+							}
+						});
+					}
+
+					// get site structure
+					let promises = [];
+					promises.push(serverRest.findFile({
+						server: server,
+						parentID: site.id,
+						filename: 'structure.json',
+						itemtype: 'file'
+					}));
+					promises.push(serverRest.findFile({
+						server: server,
+						parentID: site.id,
+						filename: 'pages',
+						itemtype: 'folder'
+					}));
+
+					return Promise.all(promises);
+
+				})
+				.then(function (results) {
+					structureFileId = results && results[0].id;
+					pagesFileId = results && results[1].id;
+
+					if (!structureFileId) {
+						console.error('ERROR: failed to get site structure file Id');
+						return Promise.reject();
+					}
+					if (!pagesFileId) {
+						console.error('ERROR: failed to get pages folder Id');
+						return Promise.reject();
+					}
+
+					return serverRest.readFile({
+						server: server,
+						fFileGUID: structureFileId
+					});
+
+				})
+				.then(function (result) {
+					if (!result || result.err) {
+						console.error('ERROR: failed to get site structure');
+						return Promise.reject();
+					}
+					siteStructure = result;
+					let pages = siteStructure && siteStructure.pages || [];
+
+					console.info(' - verify site (Id: ' + site.id + ' total pages: ' + pages.length + ')');
+					console.info(' - site repository (name: ' + repository.name + ' content types: ' + repoContentTypes + ')');
+					console.info(' - site channel (Id: ' + channel.id + ')');
+
+					//
+					// validate parent and sibling
+					//
+					if (parentId) {
+						let foundParent = false;
+						for (let i = 0; i < pages.length; i++) {
+							if (pages[i].id === parentId) {
+								foundParent = true;
+								break;
+							}
+						}
+						if (!foundParent) {
+							console.warn('WARNING: parent ' + parentId + ' is not found');
+							parentId = undefined;
+						}
+					}
+					if (siblingId) {
+						let foundSibling = false;
+						for (let i = 0; i < pages.length; i++) {
+							if (pages[i].id === siblingId) {
+								foundSibling = true;
+								break;
+							}
+						}
+						if (!foundSibling) {
+							console.warn('WARNING: sibling ' + siblingId + ' is not found');
+							siblingId = undefined;
+						}
+					}
+					if (parentId === undefined && siblingId === undefined) {
+						console.error('ERROR: no valid parent nor sibling is specified');
+						return Promise.reject();
+					}
+
+					if (parentId !== undefined && siblingId !== undefined) {
+						realParent = parentId;
+						// check if the sibling's parent
+						for (let i = 0; i < pages.length; i++) {
+							if (pages[i].id === realParent) {
+								if (pages[i].children.includes(siblingId)) {
+									realSibling = siblingId;
+								} else {
+									console.warn('WARNING: sibling page ' + siblingId + ' is not a child page of page ' + realParent);
+								}
+								break;
+							}
+						}
+					} else if (parentId !== undefined) {
+						// add as the last child
+						realParent = parentId;
+						realSibling = undefined;
+					} else {
+						// find the parent with the sibling
+						for (let i = 0; i < pages.length; i++) {
+							if (pages[i].children && pages[i].children.length > 0 && pages[i].children.includes(siblingId)) {
+								realParent = pages[i].id;
+								realSibling = siblingId;
+								break;
+							}
+						}
+					}
+					if (!realParent) {
+						console.error('ERROR: no parent is found');
+						return Promise.reject();
+					}
+
+					//
+					// validate page name (unique among siblings)
+					//
+					let siblings = [];
+					for (let i = 0; i < pages.length; i++) {
+						if (pages[i].id === realParent) {
+							siblings = pages[i].children || [];
+							break;
+						}
+					}
+					let sameNameId = undefined;
+					for (let i = 0; i < siblings.length; i++) {
+						for (let j = 0; j < pages.length; j++) {
+							if (siblings[i] === pages[j].id && pages[j].name === pageName) {
+								sameNameId = pages[j].id;
+								break;
+							}
+						}
+						if (sameNameId !== undefined) {
+							break;
+						}
+					}
+					if (sameNameId !== undefined) {
+						console.error('ERROR: a sibling page (' + sameNameId + ') with the same name ' + pageName + ' already exists');
+						return Promise.reject();
+					}
+
+					//
+					// validte pageUrl (unique cross site)
+					//
+					let sameUrlId = undefined;
+					for (let i = 0; i < pages.length; i++) {
+						if (pages[i].pageUrl === pageUrl) {
+							sameUrlId = pages[i].id;
+						}
+					}
+					if (sameUrlId !== undefined) {
+						console.error('ERROR: a page (' + sameUrlId + ') with the same pageUrl ' + pageUrl + ' already exists');
+						return Promise.reject();
+					}
+
+					// find all components, items and content types used on the page
+					// temporary page id, will be replaced later
+					let pageData = {
+						id: '999999',
+						data: pageJson
+					};
+
+					var pageContent = _getPageInfo(site.id, [pageData], site.defaultLanguage);
+					componentsUsed = pageContent && pageContent.components || [];
+					itemsUsed = pageContent && pageContent.items || [];
+					typesUsed = pageContent && pageContent.types || [];
+					siteUsedData = pageContent && pageContent.siteUsedData || [];
+
+					//
+					// query components used on the page
+					//
+					let queryCompPromises = [];
+					componentsUsed.forEach(function (name) {
+						queryCompPromises.push(sitesRest.resourceExist({
+							server: server,
+							name: name,
+							type: 'components',
+							showInfo: false
+						}));
+					});
+
+					return Promise.all(queryCompPromises);
+
+				})
+				.then(function (results) {
+					if (componentsUsed.length > 0) {
+						components = results;
+					}
+
+					//
+					// query items on the page
+					//
+					let queryItemPromises = [];
+					if (itemsUsed.length > 0) {
+						let idq = '';
+						itemsUsed.forEach(function (id) {
+							if (idq) {
+								idq = idq + ' or ';
+							}
+							idq = idq + 'id eq "' + id + '"';
+						});
+						let q = '(channels co "' + channel.id + '") AND (' + idq + ')';
+						queryItemPromises.push(serverRest.queryItems({
+							server: server,
+							q: q,
+							showTotal: false
+						}));
+					}
+
+					return Promise.all(queryItemPromises);
+
+				})
+				.then(function (results) {
+
+					if (itemsUsed.length > 0) {
+						items = results && results[0] && results[0].data || [];
+					}
+
+					// 
+					// validate components, items and types
+					//
+					var validated = true;
+					componentsUsed.forEach(function (name) {
+						let found = false;
+						for (let i = 0; i < components.length; i++) {
+							if (name === components[i].name && components[i].id) {
+								found = true;
+								break;
+							}
+						}
+						if (!found) {
+							if (ignoreValidation) {
+								console.warn('WARNING: component ' + name + ' does not exist');
+							} else {
+								console.error('ERROR: component ' + name + ' does not exist');
+								validated = false;
+							}
+						}
+					});
+					itemsUsed.forEach(function (id) {
+						let found = false;
+						for (let i = 0; i < items.length; i++) {
+							if (id === items[i].id) {
+								found = true;
+								break;
+							}
+						}
+						if (!found) {
+							if (ignoreValidation) {
+								console.warn('WARNING: item ' + id + ' is not in the site channel');
+							} else {
+								console.error('ERROR: item ' + id + ' is not in the site channel');
+								validated = false;
+							}
+						}
+					});
+					typesUsed.forEach(function (type) {
+						if (!repoContentTypes.includes(type)) {
+							if (ignoreValidation) {
+								console.warn('WARNING: type ' + type + ' is not in repository ' + repository.name);
+							} else {
+								console.error('ERROR: type ' + type + ' is not in repository ' + repository.name);
+								validated = false;
+							}
+						}
+					});
+
+
+					if (!validated) {
+						return Promise.reject();
+					}
+
+					return serverUtils.getIdcToken(server);
+
+				})
+				.then(function (result) {
+
+					idcToken = result && result.idcToken;
+
+					// generate new page ID
+					return _createPageId(server, idcToken, site.name, pageLayout);
+
+				})
+				.then(function (result) {
+					pageId = result && result[0] && result[0].properties && result[0].properties.pageId;
+					if (!pageId) {
+						let msg = result && result.LocalData && (result.LocalData.StatusMessage || result.LocalData.StatusMessageKey) || '';
+						console.error('ERROR: failed to create page Id ' + msg);
+						return Promise.reject();
+					}
+
+					var format = '   %-20s %-s';
+					console.info(' - creating site page ...');
+					console.info(sprintf(format, 'new page Id', pageId));
+					console.info(sprintf(format, 'parent', realParent));
+					console.info(sprintf(format, 'sibling', realSibling !== undefined ? realSibling : 'last child'));
+					console.info(sprintf(format, 'name', pageName));
+					console.info(sprintf(format, 'pageUrl', pageUrl));
+					console.info(sprintf(format, 'pageLayout', pageLayout));
+					console.info(sprintf(format, 'components', componentsUsed));
+					console.info(sprintf(format, 'items', itemsUsed));
+					console.info(sprintf(format, 'types', typesUsed));
+
+					//
+					// upload the page json file
+					//
+					return serverRest.createFile({
+						server: server,
+						parentID: pagesFileId,
+						filename: pageId + '.json',
+						contents: fs.readFileSync(pageJsonFilePath)
+					});
+				})
+				.then(function (result) {
+					if (!result || result.err || !result.id) {
+						console.error('ERROR: failed to upload page JSON file');
+						return Promise.reject();
+					}
+					console.info(' - created page JSON file (name: ' + result.name + ' Id: ' + result.id + ')');
+
+					pageDetails.id = pageId;
+					pageDetails.parentId = realParent;
+					pageDetails.children = [];
+					// add to structure.json
+					siteStructure.pages.push(pageDetails);
+					// update the parent to include the new page
+					for (let i = 0; i < siteStructure.pages.length; i++) {
+						if (siteStructure.pages[i].id === realParent) {
+							let parentPage = siteStructure.pages[i];
+							if (realSibling === undefined) {
+								// add to the end
+								parentPage.children.push(pageId);
+							} else {
+								let idx = parentPage.children.indexOf(realSibling);
+								if (idx >= 0) {
+									// follow the specified sibling
+									siteStructure.pages[i].children.splice(idx + 1, 0, pageId);
+								} else {
+									// add to the end
+									parentPage.children.push(pageId);
+								}
+							}
+						}
+					}
+					// console.log(siteStructure);
+
+					//
+					// update structure.json
+					//
+					let buildfolder = serverUtils.getBuildFolder(projectDir);
+					if (!fs.existsSync(buildfolder)) {
+						fs.mkdirSync(buildfolder);
+					}
+					let sitesBuildDir = path.join(buildfolder, 'sites');
+					if (!fs.existsSync(sitesBuildDir)) {
+						fs.mkdirSync(sitesBuildDir);
+					}
+					let fileName = 'structure.json';
+					let filePath = path.join(sitesBuildDir, fileName);
+					fs.writeFileSync(filePath, JSON.stringify(siteStructure, null, 4));
+					return serverRest.createFile({
+						server: server,
+						parentID: site.id,
+						filename: fileName,
+						contents: fs.createReadStream(filePath)
+					});
+
+				})
+				.then(function (result) {
+					if (!result || result.err || !result.id) {
+						console.error('ERROR: failed to update site structure');
+						return Promise.reject();
+					}
+
+					console.info(' - updated site structure');
+
+					// 
+					// update site used data
+					//
+					var usedDataPromises = [];
+					if (siteUsedData.length > 0) {
+						// set the real page id
+						siteUsedData.forEach(function (data) {
+							data.pageID = pageId;
+						});
+						// console.log(JSON.stringify(siteUsedData, null, 4));
+
+						usedDataPromises.push(serverUtils.setSiteUsedData(server, idcToken, site.id, siteUsedData));
+					}
+
+					return Promise.all(usedDataPromises);
+
+				})
+				.then(function (results) {
+					if (siteUsedData.length > 0) {
+						if (!results || !results[0] || results[0].err) {
+							console.error('ERROR: failed to set site used data');
+							return Promise.reject();
+						} else {
+							console.info(' - update site used data for the page');
+						}
+					}
+
+					// save page id to page detail file
+					pageDetails.id = pageId;
+					pageDetails.parentId = realParent;
+					fs.writeFileSync(pageDetailsFilePath, JSON.stringify(pageDetails, null, 4));
+					console.log(' - page id saved to file ' + pageDetailsFilePath);
+
+					done(true);
+				})
+				.catch((error) => {
+					if (error) {
+						console.error(error);
+					}
+					done();
+				});
+		});
+};
+
+
 /**
  * Transfer site
  */
@@ -2903,7 +3535,7 @@ var _updateSiteUsedData = function (destServer, idcToken, destSite, siteUsedData
 		// console.log(' - itemsUsedAdded: \n' + JSON.stringify(itemsUsedAdded, null, 4));
 		// console.log(' - itemsUsedDeleted: \n' + JSON.stringify(itemsUsedDeleted, null, 4));
 
-		if (itemsUsedAdded.length === 0 && itemsUsedAdded.length === 0) {
+		if (itemsUsedAdded.length === 0 && itemsUsedDeleted.length === 0) {
 			console.info(' - no change for site used items')
 			return resolve({});
 		} else {
@@ -2930,26 +3562,28 @@ var _updateSiteUsedData = function (destServer, idcToken, destSite, siteUsedData
 
 };
 
-var _getPages = function (server, siteName, pages) {
+var _getPages = function (server, pageFiles) {
 	return new Promise(function (resolve, reject) {
 		var pageData = [];
-		var doQueryPage = pages.reduce(function (pagePromise, pageId) {
+		var doQueryPage = pageFiles.reduce(function (pagePromise, pageFile) {
 			return pagePromise.then(function (result) {
-				return documentUtils.getFile({ file: 'site:' + siteName + '/pages/' + pageId + '.json' }, server)
-					.then(function (result) {
-						var pageSource = {};
-						if (result && result.data) {
-							try {
-								pageSource = JSON.parse(result.data);
-							} catch (e) {
-								// validate
-							}
+				return serverRest.downloadFile({
+					server: server,
+					fFileGUID: pageFile.fileId
+				}).then(function (result) {
+					var pageSource = {};
+					if (result && result.data) {
+						try {
+							pageSource = JSON.parse(result.data);
+						} catch (e) {
+							// validate
 						}
-						pageData.push({
-							id: pageId,
-							data: pageSource
-						})
+					}
+					pageData.push({
+						id: pageFile.pageId,
+						data: pageSource
 					})
+				})
 			});
 		},
 			// Start with a previousPromise value that is a resolved promise 
@@ -3019,7 +3653,7 @@ var _getContentListQueryString = function (type, limit, offset, orderBy, categor
 //
 // Get components, content items on the pages
 //
-var _getPageInfo = function (pages, locale) {
+var _getPageInfo = function (siteId, pages, locale) {
 	const _ootbComps = ["scs-title", "scs-paragraph", "scs-text", "scs-text-link", "scs-button", "scs-divider",
 		"scs-spacer", "scs-contentitem", "scs-contentplaceholder", "scs-contentlist", "scs-contentsearch",
 		"scs-recommendation", "scs-image", "scs-gallery", "scs-gallerygrid", "scs-youtube", "scs-video",
@@ -3033,17 +3667,39 @@ var _getPageInfo = function (pages, locale) {
 	var contentTypes = [];
 	var contentListQueries = [];
 	var contentNames = [];
+	var siteUsedData = [];
 
-	var _getInstanceInfo = function (comp) {
+	var _getInstanceInfo = function (siteId, pageId, compInstanceId, comp) {
 		var data = comp.data || {};
 		// collect content items, content lists and components
 		if (comp.id === 'scs-contentitem' || (comp.id === 'scsCaaSLayout' && comp.type === 'scs-component')) {
 			if (data.contentId && !itemIds.includes(data.contentId)) {
-				itemIds.push(comp.data.contentId);
+				itemIds.push(data.contentId);
+
+				if (compInstanceId) {
+					siteUsedData.push({
+						type: 'contentItem',
+						identifier: siteId,
+						instanceID: compInstanceId,
+						pageID: pageId,
+						contentItemID: data.contentId,
+						version: data.contentViewing || 'draft'
+					});
+				}
 			}
 			if (data.contentTypes && data.contentTypes.length > 0 && data.contentTypes[0]) {
 				if (!contentTypes.includes(data.contentTypes[0])) {
 					contentTypes.push(data.contentTypes[0]);
+
+					if (compInstanceId) {
+						siteUsedData.push({
+							type: 'contentType',
+							identifier: siteId,
+							instanceID: compInstanceId,
+							pageID: pageId,
+							name: data.contentTypes[0]
+						});
+					}
 				}
 			}
 		} else if (comp.id === 'scs-image' || comp.id === 'scs-gallery' || comp.id === 'scs-video') {
@@ -3051,6 +3707,17 @@ var _getPageInfo = function (pages, locale) {
 				for (let k = 0; k < data.contentIds.length; k++) {
 					if (!itemIds.includes(data.contentIds[k])) {
 						itemIds.push(data.contentIds[k]);
+
+						if (compInstanceId) {
+							siteUsedData.push({
+								type: 'contentItem',
+								identifier: siteId,
+								instanceID: compInstanceId,
+								pageID: pageId,
+								contentItemID: data.contentIds[k],
+								version: data.contentViewing || 'draft'
+							});
+						}
 					}
 				}
 			}
@@ -3066,6 +3733,16 @@ var _getPageInfo = function (pages, locale) {
 				contentListQueries.push(str);
 				if (!contentTypes.includes(type)) {
 					contentTypes.push(type);
+
+					if (compInstanceId) {
+						siteUsedData.push({
+							type: 'contentType',
+							identifier: siteId,
+							instanceID: compInstanceId,
+							pageID: pageId,
+							name: data.contentTypes[0]
+						});
+					}
 				}
 			}
 		} else if (!_ootbComps.includes(comp.id) && (comp.type === 'scs-component' || comp.type === 'scs-app')) {
@@ -3074,6 +3751,16 @@ var _getPageInfo = function (pages, locale) {
 			if (name && name !== comp.type) {
 				if (!components.includes(name)) {
 					components.push(name);
+
+					if (compInstanceId) {
+						siteUsedData.push({
+							type: 'component',
+							identifier: siteId,
+							instanceID: compInstanceId,
+							pageID: pageId,
+							name: name
+						});
+					}
 				}
 			}
 		}
@@ -3094,16 +3781,18 @@ var _getPageInfo = function (pages, locale) {
 			});
 		}
 	};
+
 	for (var i = 0; i < pages.length; i++) {
 		var pageId = pages[i].id;
 		var componentInstances = pages[i].data.componentInstances || {};
 		Object.keys(componentInstances).forEach(function (key) {
 			var comp = componentInstances[key];
-			_getInstanceInfo(comp);
+			_getInstanceInfo(siteId, pageId, key, comp);
 
 			if (comp.data.nestedComponents && comp.data.nestedComponents.length > 0) {
 				for (let i = 0; i < comp.data.nestedComponents.length; i++) {
-					_getInstanceInfo(comp.data.nestedComponents[i]);
+					//nested components do not have instance Id
+					_getInstanceInfo(siteId, pageId, '', comp.data.nestedComponents[i]);
 				}
 			}
 		});
@@ -3114,7 +3803,8 @@ var _getPageInfo = function (pages, locale) {
 		items: itemIds,
 		types: contentTypes,
 		contentLists: contentListQueries,
-		content: contentNames
+		content: contentNames,
+		siteUsedData: siteUsedData
 	});
 };
 
@@ -3126,9 +3816,10 @@ var _updateSitePageUsedData = function (destServer, idcToken, destSite, pageIds,
 		var itemsUsedAdded = [];
 		var itemsUsedDeleted = [];
 
+		// the value in pageIds is number 
 		// components to add
 		siteUsedData.componentsUsed.forEach(function (comp) {
-			if (pageIds.includes(comp.scsPageID)) {
+			if (pageIds.includes(parseInt(comp.scsPageID))) {
 				var found = false;
 				for (var i = 0; i < destSiteUsedData.componentsUsed.length; i++) {
 					var destComp = destSiteUsedData.componentsUsed[i];
@@ -3153,7 +3844,7 @@ var _updateSitePageUsedData = function (destServer, idcToken, destSite, pageIds,
 
 		// components to delete
 		destSiteUsedData.componentsUsed.forEach(function (destComp) {
-			if (pageIds.includes(destComp.scsPageID)) {
+			if (pageIds.includes(parseInt(destComp.scsPageID))) {
 				var found = false;
 				for (var i = 0; i < siteUsedData.componentsUsed.length; i++) {
 					var comp = siteUsedData.componentsUsed[i];
@@ -3178,7 +3869,7 @@ var _updateSitePageUsedData = function (destServer, idcToken, destSite, pageIds,
 
 		// content items to add 
 		siteUsedData.contentItemsUsed.forEach(function (item) {
-			if (pageIds.includes(item.scsPageID)) {
+			if (pageIds.includes(parseInt(item.scsPageID))) {
 				var found = false;
 				for (var i = 0; i < destSiteUsedData.contentItemsUsed.length; i++) {
 					var destItem = destSiteUsedData.contentItemsUsed[i];
@@ -3204,7 +3895,7 @@ var _updateSitePageUsedData = function (destServer, idcToken, destSite, pageIds,
 
 		// content items to delete 
 		destSiteUsedData.contentItemsUsed.forEach(function (destItem) {
-			if (pageIds.includes(destItem.scsPageID)) {
+			if (pageIds.includes(parseInt(destItem.scsPageID))) {
 				var found = false;
 				for (var i = 0; i < siteUsedData.contentItemsUsed.length; i++) {
 					var item = siteUsedData.contentItemsUsed[i];
@@ -3229,7 +3920,7 @@ var _updateSitePageUsedData = function (destServer, idcToken, destSite, pageIds,
 
 		// content types to add 
 		siteUsedData.contentTypesUsed.forEach(function (type) {
-			if (pageIds.includes(type.scsPageID)) {
+			if (pageIds.includes(parseInt(type.scsPageID))) {
 				var found = false;
 				for (var i = 0; i < destSiteUsedData.contentTypesUsed.length; i++) {
 					var destType = destSiteUsedData.contentTypesUsed[i];
@@ -3253,7 +3944,7 @@ var _updateSitePageUsedData = function (destServer, idcToken, destSite, pageIds,
 		});
 		// content types to delete 
 		destSiteUsedData.contentTypesUsed.forEach(function (destType) {
-			if (pageIds.includes(destType.scsPageID)) {
+			if (pageIds.includes(parseInt(destType.scsPageID))) {
 				var found = false;
 				for (var i = 0; i < siteUsedData.contentTypesUsed.length; i++) {
 					var type = siteUsedData.contentTypesUsed[i];
@@ -3279,7 +3970,7 @@ var _updateSitePageUsedData = function (destServer, idcToken, destSite, pageIds,
 		// console.log(' - itemsUsedAdded: \n' + JSON.stringify(itemsUsedAdded, null, 4));
 		// console.log(' - itemsUsedDeleted: \n' + JSON.stringify(itemsUsedDeleted, null, 4));
 
-		if (itemsUsedAdded.length === 0 && itemsUsedAdded.length === 0) {
+		if (itemsUsedAdded.length === 0 && itemsUsedDeleted.length === 0) {
 			console.info(' - no change for site used items')
 			return resolve({});
 		} else {
@@ -3436,6 +4127,88 @@ var _transferSiteContent = function (server, destServer, site, destSite, name, f
 	});
 };
 
+var _getChildPages = function (structureJson, parentId, childIds) {
+	var pages = structureJson && structureJson.pages || [];
+	for (let i = 0; i < pages.length; i++) {
+		if (pages[i].id.toString() === parentId.toString()) {
+			if (pages[i].children && pages[i].children.length > 0) {
+				for (let j = 0; j < pages[i].children.length; j++) {
+					childIds.push(pages[i].children[j]);
+				}
+				for (let j = 0; j < pages[i].children.length; j++) {
+					_getChildPages(structureJson, pages[i].children[j], childIds);
+				}
+			}
+		}
+	}
+};
+
+var _addPagesToStructure = function (server, site, srcSiteStructure, destSiteStructure, pageIds) {
+	return new Promise(function (resolve, reject) {
+		if (pageIds.length === 0) {
+			return resolve({});
+		} else {
+			// first add the each page to site structure
+			pageIds.forEach(function (pageId) {
+				let pageNode = undefined;
+				for (let i = 0; i < srcSiteStructure.pages.length; i++) {
+					if (pageId == srcSiteStructure.pages[i].id) {
+						pageNode = srcSiteStructure.pages[i];
+						break;
+					}
+				}
+				if (pageNode) {
+					destSiteStructure.pages.push(pageNode);
+				}
+			});
+			// add the page to its parent's children array
+			pageIds.forEach(function (pageId) {
+				let parentId = undefined;
+				for (let i = 0; i < srcSiteStructure.pages.length; i++) {
+					if (pageId == srcSiteStructure.pages[i].id) {
+						parentId = srcSiteStructure.pages[i].parentId;
+						break;
+					}
+				}
+
+				if (parentId) {
+					let srcChildren = [];
+					for (let i = 0; i < srcSiteStructure.pages.length; i++) {
+						if (parentId == srcSiteStructure.pages[i].id) {
+							srcChildren = srcSiteStructure.pages[i].children;
+							break;
+						}
+					}
+
+					let idx = srcChildren.indexOf(pageId);
+					for (let i = 0; i < destSiteStructure.pages.length; i++) {
+						if (parentId == destSiteStructure.pages[i].id && !destSiteStructure.pages[i].children.includes(pageId)) {
+							if (idx >= destSiteStructure.pages[i].children.length) {
+								destSiteStructure.pages[i].children.push(pageId);
+							} else {
+								destSiteStructure.pages[i].children.splice(idx, 0, pageId);
+							}
+							break;
+						}
+					}
+				}
+			});
+			// update the site structure
+			let fileName = 'structure.json';
+			let filePath = path.join(documentsSrcDir, site.name, fileName);
+			fs.writeFileSync(filePath, JSON.stringify(destSiteStructure, null, 4));
+			serverRest.createFile({
+				server: server,
+				parentID: site.id,
+				filename: fileName,
+				contents: fs.createReadStream(filePath)
+			}).then(function (result) {
+				return resolve(result);
+			});
+		}
+	});
+};
+
 /**
  * Transfer site pages
  */
@@ -3469,13 +4242,19 @@ module.exports.transferSitePage = function (argv, done) {
 	}
 
 	var siteName = argv.name;
-	var pageIds = argv.pages ? argv.pages.toString().split(',') : [];
+	var pageIds = typeof argv.pages === 'number' ? [argv.pages] : argv.pages.split(',');
+	for (let i = 0; i < pageIds.length; i++) {
+		pageIds[i] = parseInt(pageIds[i]);
+	}
 
 	var srcSite, destSite;
 	var srcSiteChannelToken;
 	var srcSiteStructure, destSiteStructure;
 	var validPageIds = [];
+	var validPageParentIds = [];
 	var pageIdsToTransfer = [];
+	var pageIdsToUpdate = [];
+	var pageIdsToCreate = [];
 	// an array of page json objects
 	var pageData = [];
 	// names of components on the pages
@@ -3492,6 +4271,7 @@ module.exports.transferSitePage = function (argv, done) {
 
 	var siteContentName = serverUtils.replaceAll(contentName, 'items', 'content');
 
+	var srcPagesFolderId;
 	var destPagesFolderId;
 
 	serverUtils.loginToServer(server)
@@ -3575,9 +4355,10 @@ module.exports.transferSitePage = function (argv, done) {
 			for (let i = 0; i < pageIds.length; i++) {
 				let found = false;
 				for (let j = 0; j < srcSiteStructure.pages.length; j++) {
-					if (pageIds[i].toString() === srcSiteStructure.pages[j].id.toString()) {
+					if (pageIds[i] == srcSiteStructure.pages[j].id) {
 						found = true;
 						validPageIds.push(pageIds[i]);
+						validPageParentIds.push(srcSiteStructure.pages[j].parentId || 'root');
 						break;
 					}
 				}
@@ -3594,7 +4375,7 @@ module.exports.transferSitePage = function (argv, done) {
 			return documentUtils.getFile({ file: 'site:' + siteName + '/structure.json' }, destServer);
 		})
 		.then(function (result) {
-			if (!result || result.err || !result.data) {
+			if (!result || result.err || !result.id || !result.data) {
 				console.error('ERROR: failed to get site structure on destination server');
 				return Promise.reject();
 			}
@@ -3604,7 +4385,7 @@ module.exports.transferSitePage = function (argv, done) {
 				// validate
 			}
 			if (!destSiteStructure) {
-				console.error('ERROR: site structure on source server is invalid');
+				console.error('ERROR: site structure on destination server is invalid');
 				return Promise.reject();
 			}
 
@@ -3612,30 +4393,96 @@ module.exports.transferSitePage = function (argv, done) {
 			for (let i = 0; i < validPageIds.length; i++) {
 				let found = false;
 				for (let j = 0; j < destSiteStructure.pages.length; j++) {
-					if (validPageIds[i].toString() === destSiteStructure.pages[j].id.toString()) {
+					if (validPageIds[i] == destSiteStructure.pages[j].id) {
 						found = true;
-						pageIdsToTransfer.push(validPageIds[i]);
 						break;
 					}
 				}
-				if (!found) {
-					console.error('ERROR: page ' + validPageIds[i] + ' does not exist on destination server');
+				if (found) {
+					pageIdsToUpdate.push(validPageIds[i]);
+				} else {
+					// verify new page's parent exist on the target
+					let parentId = validPageParentIds[i];
+					let foundParent = false;
+					if (parentId) {
+						for (let j = 0; j < destSiteStructure.pages.length; j++) {
+							if (parentId == destSiteStructure.pages[j].id) {
+								foundParent = true;
+								break;
+							}
+						}
+					}
+					if (parentId && !foundParent) {
+						console.error('ERROR: page ' + validPageIds[i] + '\'s parent page ' + parentId + '  does not exist on destination server');
+					} else {
+						pageIdsToCreate.push(validPageIds[i]);
+					}
 				}
 			}
-			if (pageIdsToTransfer.length === 0) {
+			if (pageIdsToCreate.length === 0 && pageIdsToUpdate.length === 0) {
 				console.error('ERROR: no valid page to transfer');
 				return Promise.reject();
 			}
 
-			console.info(' - pages to transfer ' + pageIdsToTransfer);
+			if (pageIdsToCreate.length > 0) {
+				// all child pages will be transferred
+				pageIdsToCreate.forEach(function (parentId) {
+					let childIds = [];
+					_getChildPages(srcSiteStructure, parentId, childIds);
+					// console.log(' - page ' + parentId + ' children: ' + childIds);
+					pageIdsToCreate = pageIdsToCreate.concat(childIds);
+				});
+			}
 
-			return _getPages(server, siteName, pageIdsToTransfer);
+			console.info(' - pages to update: ' + pageIdsToUpdate);
+			console.info(' - pages to create: ' + pageIdsToCreate);
+
+			pageIdsToTransfer = pageIdsToCreate.concat(pageIdsToUpdate);
+
+			// find folder pages on the source server 
+			return serverRest.findFolderHierarchy({
+				server: server,
+				parentID: srcSite.id,
+				folderPath: 'pages'
+			});
+
+		})
+		.then(function (result) {
+			if (!result || !result.id) {
+				return Promise.reject();
+			}
+			srcPagesFolderId = result.id;
+
+			// get page file ids 
+			return serverRest.getAllChildItems({
+				server: server,
+				parentID: srcPagesFolderId
+			});
+
+		})
+		.then(function (result) {
+			let pageFiles = result || [];
+			let pageFileIds = [];
+			pageIdsToTransfer.forEach(function (id) {
+				let pageName = id + '.json';
+				for (let i = 0; i < pageFiles.length; i++) {
+					if (pageName === pageFiles[i].name) {
+						pageFileIds.push({
+							pageId: id,
+							fileId: pageFiles[i].id
+						});
+					}
+				}
+			});
+			// console.log(pageFileIds);
+
+			return _getPages(server, pageFileIds);
 
 		})
 		.then(function (result) {
 			pageData = result;
 
-			var pageContent = _getPageInfo(pageData, srcSite.defaultLanguage);
+			var pageContent = _getPageInfo(srcSite.id, pageData, srcSite.defaultLanguage);
 			components = pageContent && pageContent.components || [];
 			itemIds = pageContent && pageContent.items || [];
 			contentListQueries = pageContent && pageContent.contentLists || [];
@@ -3816,15 +4663,36 @@ module.exports.transferSitePage = function (argv, done) {
 				let updated = false;
 				for (let i = 0; i < results.length; i++) {
 					if (page.id + '.json' === results[i].name) {
-						console.info(' - updated page ' + page.id);
 						updated = true;
 						break;
 					}
 				}
-				if (!updated) {
-					console.error(' - failed to update page ' + page.id);
+				if (updated) {
+					if (pageIdsToCreate.includes(parseInt(page.id))) {
+						console.info(' - created page ' + page.id);
+					} else {
+						console.info(' - updated page ' + page.id);
+					}
+				} else {
+					if (pageIdsToCreate.includes(parseInt(page.id))) {
+						console.error(' - failed to create page ' + page.id);
+					} else {
+						console.error(' - failed to update page ' + page.id);
+					}
 				}
 			});
+
+			return _addPagesToStructure(destServer, destSite, srcSiteStructure, destSiteStructure, pageIdsToCreate);
+
+		})
+		.then(function (result) {
+			if (pageIdsToCreate.length > 0) {
+				if (!result || result.err) {
+					return Promise.reject();
+				} else {
+					console.info(' - added new pages to site structure');
+				}
+			}
 
 			// get site metadata
 			var getUsedDataPromises = [];
@@ -4767,12 +5635,8 @@ module.exports.exportSite = function (argv, done) {
 		}
 
 		var siteName = argv.name;
-		var exportname = argv.exportname || argv.name;
+		var jobName = argv.jobname || argv.name;
 		var includeunpublishedassets = argv.includeunpublishedassets;
-		var downloadPath = argv.path || '';
-
-		// TODO: Temporary workaround for job name
-		exportname = exportname.replace('-', '_');
 
 		// folder path on the server
 		var folder = argv.folder && argv.folder.toString();
@@ -4843,7 +5707,7 @@ module.exports.exportSite = function (argv, done) {
 
 					sitesRest.exportSite({
 						server: server,
-						name: exportname,
+						name: jobName,
 						siteName: siteName,
 						siteId: siteInfo.id,
 						folderId: folderId,
@@ -4879,8 +5743,8 @@ module.exports.exportSite = function (argv, done) {
 									folder: targetPath
 								};
 
-								documentUtils.downloadFolder(downloadArgv, server, true, true).then(function () {
-									console.info('   Downloaded export site files to ' + targetPath);
+								documentUtils.downloadFolder(downloadArgv, server, true, true, [], exportSiteFileGroupSize).then(function () {
+									console.info(' - Downloaded export site files to ' + targetPath);
 									done(true);
 								});
 							} else if (data.err) {
@@ -4928,7 +5792,7 @@ module.exports.importSite = function (argv, done) {
 			uploadPath = argv.path || path.join(projectDir, 'src', 'siteExport', siteName),
 			folderName = uploadPath.split(path.sep).pop(),
 			folderPathName = inputFolder || folderName,
-			importName = argv.importname || siteName,
+			jobName = argv.jobname || siteName,
 			repository = argv.repository,
 			localizationPolicy = argv.localizationPolicy,
 			sitePrefix = argv.sitePrefix && argv.sitePrefix.toLowerCase(),
@@ -5051,8 +5915,6 @@ module.exports.importSite = function (argv, done) {
 					return Promise.all(findFolderPromises);
 				})
 				.then(function (folders) {
-					// console.info('ImportSite uploadFolder id ' + folders[0].id);
-
 					if (!folders[0] || !folders[0].id) {
 						return Promise.reject('ImportSite: import folder ' + folderPathName + ' not found');
 					} else {
@@ -5068,7 +5930,7 @@ module.exports.importSite = function (argv, done) {
 				})
 				.then(function (archives) {
 					var archivedata = archives[0];
-					console.info('   ImportSite archive id ' + archivedata.id);
+					console.info(' - Import site archive id ' + archivedata.id);
 
 					var importSitePromises = [];
 
@@ -5084,7 +5946,7 @@ module.exports.importSite = function (argv, done) {
 							}
 							importSitePromises.push(sitesRest.importSite({
 								server: server,
-								name: importName,
+								name: jobName,
 								archiveId: archivedata.id,
 								siteId: siteId,
 								repositoryId: importRepo.id,
@@ -5174,16 +6036,25 @@ module.exports.unblockImportJob = function (argv, done) {
 					}
 				}
 
+			// Note: Export service on dev instances requires additional header
+			var headers;
+			if (server.env === 'dev_ec') {
+				headers = { 'IDCS_REMOTE_USER': server.username };
+			}
+
 			serverRest.executePost({
 				server: server,
 				endpoint: url,
 				body: body,
-				noMsg: true
+				noMsg: true,
+				headers: headers
 			}).then(function (data) {
 				if (data && data['o:errorCode']) {
 					console.info('Failed to unblock import job ' + argv.id + ' : ' + (data ? data.title : ''));
 				} else {
 					console.info('Unblocked import job ' + argv.id);
+					console.info('To monitor the job progress and download the report, run the following command:');
+					console.info('cec describe-import-job ' + argv.id + ' -d -s ' + serverName);
 				}
 
 				done(true);
@@ -5224,10 +6095,17 @@ module.exports.cancelExportJob = function (argv, done) {
 
 			var url = '/system/export/api/v1/exports/' + argv.id + '/cancel';
 
+			// Note: Export service on dev instances requires additional header
+			var headers;
+			if (server.env === 'dev_ec') {
+				headers = { 'IDCS_REMOTE_USER': server.username };
+			}
+
 			serverRest.executePost({
 				server: server,
 				endpoint: url,
-				noMsg: true
+				noMsg: true,
+				headers: headers
 			}).then(function (data) {
 				// console.log('cancelExportJob data ' + JSON.stringify(data));
 				if (!data || data['o:errorCode']) {
@@ -5274,10 +6152,17 @@ module.exports.cancelImportJob = function (argv, done) {
 
 			var url = '/system/export/api/v1/imports/' + argv.id + '/cancel';
 
+			// Note: Export service on dev instances requires additional header
+			var headers;
+			if (server.env === 'dev_ec') {
+				headers = { 'IDCS_REMOTE_USER': server.username };
+			}
+
 			serverRest.executePost({
 				server: server,
 				endpoint: url,
-				noMsg: true
+				noMsg: true,
+				headers: headers
 			}).then(function (data) {
 				// console.log('cancelImportJob data ' + JSON.stringify(data));
 				if (!data || data['o:errorCode']) {
@@ -5323,9 +6208,17 @@ module.exports.deleteExportJob = function (argv, done) {
 			}
 
 			var url = '/system/export/api/v1/exports/' + argv.id;
+
+			// Note: Export service on dev instances requires additional header
+			var headers;
+			if (server.env === 'dev_ec') {
+				headers = { 'IDCS_REMOTE_USER': server.username };
+			}
+
 			serverRest.executeDelete({
 				server: server,
-				endpoint: url
+				endpoint: url,
+				headers: headers
 			}).then(function (data) {
 				// console.log('deleteExportJob data ' + JSON.stringify(data));
 				if (data.err) {
@@ -5371,9 +6264,17 @@ module.exports.deleteImportJob = function (argv, done) {
 			}
 
 			var url = '/system/export/api/v1/imports/' + argv.id;
+
+			// Note: Export service on dev instances requires additional header
+			var headers;
+			if (server.env === 'dev_ec') {
+				headers = { 'IDCS_REMOTE_USER': server.username };
+			}
+
 			serverRest.executeDelete({
 				server: server,
-				endpoint: url
+				endpoint: url,
+				headers: headers
 			}).then(function (data) {
 				// console.log('deleteimportJob data ' + JSON.stringify(data));
 				if (data.err) {
@@ -5418,9 +6319,9 @@ module.exports.listExportJobs = function (argv, done) {
 				return;
 			}
 			var url = '/system/export/api/v1/exports';
-			url += '?fields=id,name,description,createdBy,createdAt,completedAt,progress,completed,currentState';
+			url += '?fields=id,name,description,createdBy,createdAt,completedAt,progress,completed';
 
-			serverRest.executeGet({
+			_executeGetExportService({
 				server: server,
 				endpoint: url,
 				noMsg: true
@@ -5594,7 +6495,7 @@ module.exports.describeExportJob = function (argv, done) {
 									folder: targetPath
 								};
 
-								documentUtils.downloadFolder(downloadArgv, server, true, true).then(function () {
+								documentUtils.downloadFolder(downloadArgv, server, true, true, [], exportSiteFileGroupSize).then(function () {
 									console.info('Downloaded export site files to ' + targetPath);
 									done(true);
 								});
@@ -5643,8 +6544,9 @@ module.exports.listImportJobs = function (argv, done) {
 
 			var url = '/system/export/api/v1/imports';
 
-			url += '?fields=id,name,description,createdBy,createdAt,completedAt,progress,currentState,completed';
-			serverRest.executeGet({
+			url += '?fields=id,name,description,createdBy,createdAt,completedAt,progress,state,completed';
+
+			_executeGetExportService({
 				server: server,
 				endpoint: url,
 				noMsg: true
@@ -5667,14 +6569,15 @@ module.exports.listImportJobs = function (argv, done) {
 								job.augmentedSiteName = sites.at(index) && sites.at(index).name;
 							});
 						}
-						var format = '%-28s  %-34s  %-12s  %-12s  %-26s  %-14s  %-28s';
+						var format = '%-28s  %-34s  %-12s  %-12s  %-22s  %-26s  %-14s  %-28s';
 						console.log('Site import jobs:');
-						console.log(sprintf(format, 'Site Name', 'Id', 'Completed', 'Progress', 'Created At', 'Duration', 'Job Name'));
+						console.log(sprintf(format, 'Site Name', 'Id', 'Completed', 'Progress', 'State', 'Created At', 'Duration', 'Job Name'));
 						data.items.forEach(function (job) {
+							var state = job.state || '';
 							if (job.completed) {
-								console.log(sprintf(format, job.augmentedSiteName || '', job.id, job.completed, job.progress, job.createdAt || '', duration(job.createdAt, job.completedAt), job.name));
+								console.log(sprintf(format, job.augmentedSiteName || '', job.id, job.completed, job.progress, state, job.createdAt || '', duration(job.createdAt, job.completedAt), job.name));
 							} else {
-								console.log(sprintf(format, job.augmentedSiteName || '', job.id, job.completed, job.progress, job.createdAt || '', '', job.name));
+								console.log(sprintf(format, job.augmentedSiteName || '', job.id, job.completed, job.progress, state, job.createdAt || '', '', job.name));
 							}
 						});
 					});
@@ -5798,6 +6701,9 @@ module.exports.describeImportJob = function (argv, done) {
 					});
 
 					console.log(sprintf(jobFormat, 'Progress', job.progress));
+					if (job.state) {
+						console.log(sprintf(jobFormat, 'State', job.state));
+					}
 					console.log(sprintf(jobFormat, 'Created At', job.createdAt));
 					if (job.completed) {
 						console.log(sprintf(jobFormat, 'Completed At', job.completedAt));
@@ -5828,13 +6734,26 @@ module.exports.describeImportJob = function (argv, done) {
 						});
 					}
 
-					if (argv.download) {
-						var siteName = data.job.targets[0].select.site.name;
-						_downloadReports(data.reports, siteName, server).then(function () {
+					var checkDownload = function (dataForDownload) {
+						if (argv.download) {
+							var siteName = dataForDownload.job.targets[0].select.site.name;
+							_downloadReports(dataForDownload.reports, siteName, server).then(function () {
+								done(true);
+							});
+						} else {
 							done(true);
+						}
+					}
+
+					if (job.progress === 'processing' && !job.completed) {
+						sitesRest.pollImportJobStatus({
+							server: server,
+							id: argv.id
+						}).then(function (polldata) {
+							checkDownload(polldata);
 						});
 					} else {
-						done(true);
+						checkDownload(data);
 					}
 				});
 			});
@@ -6079,7 +6998,11 @@ var _validateSiteREST = function (server, siteName, done) {
 						var assetsValidation = data.result.body.operations.validatePublish.validationResults;
 						_displayAssetValidation(assetsValidation);
 					} else {
-						console.log('  no assets');
+						console.log('  no result');
+						// console.log(data);
+						if (data.result.body.operations) {
+							console.log(JSON.stringify(data.result.body.operations, null, 4));
+						}
 					}
 
 					done(true);
@@ -6250,7 +7173,6 @@ module.exports.validateAssets = function (argv, done) {
 				console.info(' - submit validation job (' + statusId + ')');
 				_getValidateAssetsStatus(server, statusId)
 					.then(function (data) {
-
 						//
 						// Display result
 						//
@@ -6259,7 +7181,11 @@ module.exports.validateAssets = function (argv, done) {
 							var assetsValidation = data.result.body.operations.validatePublish.validationResults;
 							_displayAssetValidation(assetsValidation);
 						} else {
-							console.log('  no assets');
+							console.log('  no result');
+							// console.log(data);
+							if (data.result.body.operations) {
+								console.log(JSON.stringify(data.result.body.operations, null, 4));
+							}
 						}
 
 						done(true);
@@ -6666,6 +7592,243 @@ module.exports.describeSite = function (argv, done) {
 
 				done(true);
 			}).catch((error) => {
+				if (error) {
+					console.error(error);
+				}
+				done();
+			});
+	});
+};
+
+/**
+ * Describe a site page
+ */
+module.exports.describeSitePage = function (argv, done) {
+	'use strict';
+
+	if (!verifyRun(argv)) {
+		done();
+		return;
+	}
+
+	var serverName = argv.server;
+	var server = serverUtils.verifyServer(serverName, projectDir);
+	if (!server || !server.valid) {
+		done();
+		return;
+	}
+
+	var output = argv.file;
+
+	if (output) {
+		if (!path.isAbsolute(output)) {
+			output = path.join(projectDir, output);
+		}
+		output = path.resolve(output);
+
+		var outputFolder = output.substring(output, output.lastIndexOf(path.sep));
+		// console.log(' - result file: ' + output + ' folder: ' + outputFolder);
+		if (!fs.existsSync(outputFolder)) {
+			console.error('ERROR: folder ' + outputFolder + ' does not exist');
+			done();
+			return;
+		}
+
+		if (!fs.statSync(outputFolder).isDirectory()) {
+			console.error('ERROR: ' + outputFolder + ' is not a folder');
+			done();
+			return;
+		}
+	}
+
+	var name = argv.name;
+	var pageIds = typeof argv.pages === 'number' ? [argv.pages] : argv.pages.split(',');
+	for (let i = 0; i < pageIds.length; i++) {
+		pageIds[i] = parseInt(pageIds[i]);
+	}
+
+	var includeSubPages = typeof argv.expand === 'string' && argv.expand.toLowerCase() === 'true';
+
+	var loginPromise = serverUtils.loginToServer(server);
+	loginPromise.then(function (result) {
+		if (!result.status) {
+			console.error(result.statusMessage);
+			done();
+			return;
+		}
+
+		var site;
+		var siteStructure;
+		var validPageIds = [];
+		var allPageIds = [];
+		var componentsUsed, contentItemsUsed, contentTypesUsed;
+
+		sitesRest.getSite({
+			server: server,
+			name: name,
+			expand: 'ownedBy,createdBy,lastModifiedBy,members,repository,channel,vanityDomain,siteCategory'
+		})
+			.then(function (result) {
+				if (!result || result.err || !result.id) {
+					return Promise.reject();
+				}
+
+				site = result;
+
+				// get site structure
+				return serverRest.findFile({
+					server: server,
+					parentID: site.id,
+					filename: 'structure.json',
+					itemtype: 'file'
+				});
+
+			})
+			.then(function (result) {
+				if (!result || result.err || !result.id) {
+					return Promise.reject();
+				}
+				let structureFileId = result.id;
+
+				return serverRest.readFile({
+					server: server,
+					fFileGUID: structureFileId
+				});
+
+			})
+			.then(function (result) {
+				if (!result || result.err) {
+					console.error('ERROR: failed to get site structure');
+					return Promise.reject();
+				}
+				siteStructure = result;
+				let pages = siteStructure && siteStructure.pages || [];
+
+				console.info(' - verify site (Id: ' + site.id + ' total pages: ' + pages.length + ')');
+
+				// validate the pages
+				for (let i = 0; i < pageIds.length; i++) {
+					let found = false;
+					for (let j = 0; j < siteStructure.pages.length; j++) {
+						if (pageIds[i] == siteStructure.pages[j].id) {
+							found = true;
+							validPageIds.push(pageIds[i]);
+							break;
+						}
+					}
+					if (!found) {
+						console.error('ERROR: invalid page ID ' + pageIds[i]);
+					}
+				}
+				if (validPageIds.length === 0) {
+					console.error('ERROR: no valid page is specified');
+					return Promise.reject();
+				}
+
+				validPageIds.forEach(function (parentId) {
+					if (!allPageIds.includes(parentId)) {
+						allPageIds.push(parentId);
+					}
+					if (includeSubPages) {
+						let childIds = [];
+						_getChildPages(siteStructure, parentId, childIds);
+						for (let i = 0; i < childIds.length; i++) {
+							if (!allPageIds.includes(childIds[i])) {
+								allPageIds.push(childIds[i]);
+							}
+						}
+					}
+				});
+				console.info(' - pages: ' + allPageIds);
+
+				return serverUtils.getSiteUsedData(server, site.id);
+
+			})
+			.then(function (result) {
+				componentsUsed = result && result.componentsUsed || [];
+				contentItemsUsed = result && result.contentItemsUsed || [];
+				contentTypesUsed = result && result.contentTypesUsed || [];
+
+				var pages = [];
+				var allComponents = [];
+				var allItems = [];
+				var allTypes = [];
+				allPageIds.forEach(function (id) {
+					let obj = {};
+					for (let i = 0; i < siteStructure.pages.length; i++) {
+						if (id === siteStructure.pages[i].id) {
+							obj = siteStructure.pages[i];
+							break;
+						}
+					}
+
+					let comps = [];
+					componentsUsed.forEach(function (comp) {
+						if (comp.scsPageID && comp.scsPageID === id.toString() && !comps.includes(comp.scsComponentName)) {
+							comps.push(comp.scsComponentName);
+							if (!allComponents.includes(comp.scsComponentName)) {
+								allComponents.push(comp.scsComponentName);
+							}
+						}
+					});
+					obj.components = comps;
+
+					let items = [];
+					contentItemsUsed.forEach(function (item) {
+						if (item.scsPageID && item.scsPageID === id.toString() && !items.includes(item.scsContentItemID)) {
+							items.push(item.scsContentItemID);
+							if (!allItems.includes(item.scsContentItemID)) {
+								allItems.push(item.scsContentItemID);
+							}
+						}
+					});
+					obj.contentItems = items;
+
+					let types = [];
+					contentTypesUsed.forEach(function (type) {
+						if (type.scsPageID && type.scsPageID === id.toString() && !types.includes(type.scsTypeName)) {
+							types.push(type.scsTypeName);
+							if (!allTypes.includes(type.scsTypeName)) {
+								allTypes.push(type.scsTypeName);
+							}
+						}
+					});
+					obj.contentTypes = types;
+
+					pages.push(obj);
+				});
+				console.log(pages);
+
+				var format1 = '%-20s  %-s';
+				pages.forEach(function (page) {
+					console.log(sprintf(format1, 'Id', page.id));
+					console.log(sprintf(format1, 'Name', page.name));
+					console.log(sprintf(format1, 'URL', page.pageUrl));
+					console.log(sprintf(format1, 'Components', page.components));
+					console.log(sprintf(format1, 'contentItems', page.contentItems));
+					console.log(sprintf(format1, 'contentTypes', page.contentTypes));
+				});
+				console.log('');
+				if (pages.length > 1) {
+					console.log(sprintf(format1, 'All components', allComponents));
+					console.log(sprintf(format1, 'All itemss', allItems));
+					console.log(sprintf(format1, 'All types', allTypes));
+					console.log('');
+				}
+
+				if (output) {
+					let pagesJson = {
+						pages: pages,
+						allComponents: allComponents,
+						allItems: allItems,
+						allTypes: allTypes
+					};
+					fs.writeFileSync(output, JSON.stringify(pagesJson, null, 4));
+					console.log(' - properties saved to ' + output);
+				}
+				done(true);
+			})
+			.catch((error) => {
 				if (error) {
 					console.error(error);
 				}

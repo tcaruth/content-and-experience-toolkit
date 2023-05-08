@@ -349,8 +349,21 @@ var _getSiteContentTypes = function (server, id, name) {
  * @returns {Promise.<object>} The data object returned by the server.
  */
 module.exports.getSiteContentTypes = function (args) {
-	var server = args.server;
-	return _getSiteContentTypes(server, args.id, args.name);
+	return new Promise(function (resolve, reject) {
+		_getAllResources(args.server, 'sites/' + (args.id ? args.id : 'name:' + args.name) + '/assetTypes', 'type')
+			.then(function (result) {
+				var typeNames = [];
+				var items = result || [];
+				items.forEach(function (item) {
+					if (item.type && item.type.name && !typeNames.includes(item.type.name)) {
+						typeNames.push(item.type.name);
+					}
+				});
+				return resolve({
+					data: typeNames
+				});
+			});
+	});
 };
 
 var _getSiteAccess = function (server, id, name) {
@@ -959,7 +972,7 @@ var _setSiteTheme = function (server, site, themeName, showMsg) {
  * @param {object} server the server object
  * @param {object} site the site or template object
  * @param {object} themeName the name of the theme
- * @returns 
+ * @returns
  */
 module.exports.setSiteTheme = function (args) {
 	return _setSiteTheme(args.server, args.site, args.themeName, args.showMsg)
@@ -1537,7 +1550,6 @@ var _exportSite = function (server, name, siteName, siteId, folderId, includeUnp
 
 		var payload = {
 			name: name,
-			description: "",
 			target: {
 				provider: "docs",
 				docs: {
@@ -1598,8 +1610,8 @@ var _exportSite = function (server, name, siteName, siteId, folderId, includeUnp
 			var statusUrl = response.location;
 			if (statusUrl) {
 				console.info(' - submit background job');
-				statusUrl += '?fields=id,name,description,progress,completed,message,completedPercentage,sources,target.provider,target.docs.folderId,target.docs.result.folderId,target.docs.result.folderName,reports';
 				console.info(' - job status: ' + statusUrl);
+				statusUrl += '?fields=id,name,description,progress,completed,message,completedPercentage,sources,target.provider,target.docs.folderId,target.docs.result.folderId,target.docs.result.folderName,reports';
 				var startTime = new Date();
 				var needNewLine = false;
 				var inter = setInterval(function () {
@@ -1610,7 +1622,7 @@ var _exportSite = function (server, name, siteName, siteId, folderId, includeUnp
 								if (needNewLine && console.showInfo()) {
 									process.stdout.write(os.EOL);
 								}
-								console.error('   ExportSite job ' + data.id + ' ' + data.progress + ' (ecid: ' + response.ecid + ')');
+								console.error(' - Export Site job ' + data.id + ' ' + data.progress + ' (ecid: ' + response.ecid + ')');
 								return resolve({
 									err: 'err',
 									reports: _getReports(response.location, data)
@@ -1619,18 +1631,18 @@ var _exportSite = function (server, name, siteName, siteId, folderId, includeUnp
 								clearInterval(inter);
 								if (console.showInfo()) {
 									if (data.completedPercentage) {
-										process.stdout.write('   ExportSite job in process percentage ' + data.completedPercentage + ' [' + serverUtils.timeUsed(startTime, new Date()) + ']');
+										process.stdout.write(' - Export Site job in process percentage ' + data.completedPercentage + ' [' + serverUtils.timeUsed(startTime, new Date()) + ']');
 									}
 									process.stdout.write(os.EOL);
 								}
-								console.info('   ExportSite job ' + data.id + ' completed [' + serverUtils.timeUsed(startTime, new Date()) + ']');
+								console.info(' - Export Site job ' + data.id + ' completed [' + serverUtils.timeUsed(startTime, new Date()) + ']');
 								return resolve({
 									job: data,
 									reports: _getReports(response.location, data)
 								});
 							} else {
 								if (console.showInfo()) {
-									process.stdout.write('   ExportSite job in process' + (data.completedPercentage !== undefined ? ' percentage ' + data.completedPercentage : '') + ' [' + serverUtils.timeUsed(startTime, new Date()) + ']');
+									process.stdout.write(' - Export Site job in process' + (data.completedPercentage !== undefined ? ' percentage ' + data.completedPercentage : '') + ' [' + serverUtils.timeUsed(startTime, new Date()) + ']');
 								}
 								readline.cursorTo(process.stdout, 0);
 								needNewLine = true;
@@ -1713,9 +1725,9 @@ var _createArchive = function (server, folderId) {
 
 			var statusUrl = response.location;
 			if (statusUrl) {
+				console.info(' - job status: ' + statusUrl);
 				console.info(' - submit background job for create archive');
 				statusUrl += '?fields=id,entries,provider,entries.site.id,entries.site.name,entries.site.defaultLanguage,entries.site.channel,entries.site.channel,entries.site.channel.localizationPolicy,target.docs.folderId,target.docs.result.folderId,target.docs.result.folderName';
-				console.info(' - job status: ' + statusUrl);
 				var startTime = new Date();
 				var inter = setInterval(function () {
 					_getBackgroundJobStatus(server, statusUrl)
@@ -1723,13 +1735,13 @@ var _createArchive = function (server, folderId) {
 							if (!data || data.error) {
 								clearInterval(inter);
 								var msg = data && data.error ? (data.error.detail || data.error.title) : '';
-								console.error('   CreateArchive failed: ' + msg + ' (ecid: ' + response.ecid + ')');
+								console.error(' - Create archive failed: ' + msg + ' (ecid: ' + response.ecid + ')');
 								return resolve({
 									err: 'err'
 								});
 							} else {
 								clearInterval(inter);
-								console.info('   CreateArchive finished [' + serverUtils.timeUsed(startTime, new Date()) + ']');
+								console.info(' - Create archive finished [' + serverUtils.timeUsed(startTime, new Date()) + ']');
 								return resolve(data);
 							}
 						});
@@ -1794,6 +1806,73 @@ var _showValidationResults = function (source, job) {
 	console.info('');
 };
 
+var _pollImportSiteJob = function (server, statusUrl, resolve, reject, response) {
+	console.info(' - submit background job for import site');
+	console.info(' - job status: ' + statusUrl);
+	var url = statusUrl + '?fields=id,name,description,createdBy,createdAt,completedAt,progress,state,completed,completedPercentage,reports';
+
+	url += ',targets.select.type,targets.select.site,id,targets.select.site.name';
+	url += ',validationSummary.messagesByEntityTypes.entityType,validationSummary.messagesByEntityTypes.countsByLevel.warning,validationSummary.messagesByEntityTypes.countsByLevel.error,validationSummary.messagesByEntityTypes.countsByLevel.info';
+	url += ',validationResults.entityName,validationResults.entityType,validationResults.assetType.source.typeCategory,validationResults.assetType.target.typeCategory,validationResults.messages,validationResults.messages.level,validationResults.messages.text';
+
+	var startTime = new Date();
+	var needNewLine = false;
+	var inter = setInterval(function () {
+		_getBackgroundJobStatus(server, url)
+			.then(function (data) {
+				if (!data || data.error || !data.progress || data.progress === 'failed' || data.progress === 'blocked' || data.progress === 'aborted') {
+					clearInterval(inter);
+					if (needNewLine && console.showInfo()) {
+						process.stdout.write(os.EOL);
+					}
+					if (response) {
+						console.error(' - Import Site job ' + data.id + ' ' + data.progress + ' (ecid: ' + response.ecid + ')');
+					}
+					_showValidationResults(' - Import Site', data);
+					return resolve({
+						err: 'error',
+						job: data,
+						reports: _getReports(statusUrl, data)
+					});
+				} else if (data.completed && data.progress === 'succeeded') {
+					clearInterval(inter);
+					if (console.showInfo()) {
+						if (data.completedPercentage) {
+							process.stdout.write(' - Import Site job in process percentage ' + data.completedPercentage + ' [' + serverUtils.timeUsed(startTime, new Date()) + ']');
+						}
+						process.stdout.write(os.EOL);
+					}
+					console.info(' - Import Site job ' + data.id + ' completed [' + serverUtils.timeUsed(startTime, new Date()) + ']');
+					return resolve({
+						job: data,
+						reports: _getReports(statusUrl, data)
+					});
+				} else {
+					if (console.showInfo()) {
+						process.stdout.write(' - Import Site job in process' + (data.completedPercentage !== undefined ? ' percentage ' + data.completedPercentage : '') + ' [' + serverUtils.timeUsed(startTime, new Date()) + ']');
+					}
+					readline.cursorTo(process.stdout, 0);
+					needNewLine = true;
+				}
+			});
+	}, 10000);
+};
+
+/**
+ * Poll import site job
+ * @param {object} args
+ * @returns
+ */
+ module.exports.pollImportJobStatus = function (args) {
+	return new Promise(function (resolve, reject) {
+
+		var server = args.server,
+			statusUrl = server.url + '/system/export/api/v1/imports/' + args.id;
+
+		_pollImportSiteJob(server, statusUrl, resolve, reject);
+	});
+};
+
 var _importSite = function (server, name, archiveId, siteId, repositoryId, localizationPolicyId, sitePrefix, policies, assetspolicy, newsite, ignorewarnings) {
 	return new Promise(function (resolve, reject) {
 
@@ -1801,7 +1880,6 @@ var _importSite = function (server, name, archiveId, siteId, repositoryId, local
 
 		var payload = {
 			name: name,
-			description: "",
 			source: {
 				"provider": "archive",
 				"archive": {
@@ -1865,8 +1943,7 @@ var _importSite = function (server, name, archiveId, siteId, repositoryId, local
 			default:
 		}
 
-		// TODO: Temporary
-		console.info('   ImportSite payload ' + JSON.stringify(payload));
+		// console.info(' - Import Site payload ' + JSON.stringify(payload));
 
 		var options = {
 			method: 'POST',
@@ -1906,54 +1983,9 @@ var _importSite = function (server, name, archiveId, siteId, repositoryId, local
 
 			var statusUrl = response.location;
 			if (statusUrl) {
-				console.info(' - submit background job for import site');
-				statusUrl += '?fields=id,name,description,createdBy,createdAt,completedAt,progress,currentState,completed,completedPercentage,targets,reports';
-				statusUrl += ',validationSummary.messagesByEntityTypes.entityType,validationSummary.messagesByEntityTypes.countsByLevel.warning,validationSummary.messagesByEntityTypes.countsByLevel.error,validationSummary.messagesByEntityTypes.countsByLevel.info';
-				statusUrl += ',validationResults.entityName,validationResults.entityType,validationResults.assetType.source.typeCategory,validationResults.assetType.target.typeCategory,validationResults.messages,validationResults.messages.level,validationResults.messages.text';
-
-				console.info(' - job status: ' + statusUrl);
-				var startTime = new Date();
-				var needNewLine = false;
-				var inter = setInterval(function () {
-					_getBackgroundJobStatus(server, statusUrl)
-						.then(function (data) {
-							var reportURL;
-							if (!data || data.error || !data.progress || data.progress === 'failed' || data.progress === 'blocked' || data.progress === 'aborted') {
-								clearInterval(inter);
-								if (needNewLine && console.showInfo()) {
-									process.stdout.write(os.EOL);
-								}
-								console.error('   ImportSite job ' + data.id + ' ' + data.progress + ' (ecid: ' + response.ecid + ')');
-								_showValidationResults('ImportSite', data);
-								return resolve({
-									err: 'error',
-									job: data,
-									reports: _getReports(response.location, data)
-								});
-							} else if (data.completed && data.progress === 'succeeded') {
-								clearInterval(inter);
-								if (console.showInfo()) {
-									if (data.completedPercentage) {
-										process.stdout.write('   ImportSite job in process percentage ' + data.completedPercentage + ' [' + serverUtils.timeUsed(startTime, new Date()) + ']');
-									}
-									process.stdout.write(os.EOL);
-								}
-								console.info('   ImportSite job ' + data.id + ' completed [' + serverUtils.timeUsed(startTime, new Date()) + ']');
-								return resolve({
-									job: data,
-									reports: _getReports(response.location, data)
-								});
-							} else {
-								if (console.showInfo()) {
-									process.stdout.write('   ImportSite job in process' + (data.completedPercentage !== undefined ? ' percentage ' + data.completedPercentage : '') + ' [' + serverUtils.timeUsed(startTime, new Date()) + ']');
-								}
-								readline.cursorTo(process.stdout, 0);
-								needNewLine = true;
-							}
-						});
-				}, 10000);
+				_pollImportSiteJob(server, statusUrl, resolve, reject, response);
 			} else {
-				console.info('   ImportSite job status: No statusUrl');
+				console.info(' - Import Site job status: No statusUrl');
 				var msg = (data && (data.detail || data.title)) ? (data.detail || data.title) : (response ? (response.statusMessage || response.statusCode) : '');
 				console.error('ERROR: failed to import site ' + (name) + ' : ' + msg + ' (ecid: ' + response.ecid + ')');
 				resolve({
@@ -1981,7 +2013,7 @@ var _describeExportJob = function (server, id) {
 		var stem = server.url + '/system/export/api/v1/exports/' + id;
 		var url = stem;
 
-		url += '?fields=id,name,description,createdBy,createdAt,completedAt,progress,completed,currentState,completedPercentage,target.provider,target.docs.folderId,target.docs.result.folderId,target.docs.result.folderName,reports,sources.select.type,sources.select.site.id,sources.apply.exportSite.includeUnpublishedAssets';
+		url += '?fields=id,name,description,createdBy,createdAt,completedAt,progress,completed,completedPercentage,target.provider,target.docs.folderId,target.docs.result.folderId,target.docs.result.folderName,reports,sources.select.type,sources.select.site.id,sources.apply.exportSite.includeUnpublishedAssets';
 		var options = {
 			method: 'GET',
 			url: url,
@@ -1989,6 +2021,10 @@ var _describeExportJob = function (server, id) {
 				Authorization: serverUtils.getRequestAuthorization(server)
 			}
 		};
+		// Note: Export service on dev instances requires additional header
+		if (server.env === 'dev_ec') {
+			options.headers.IDCS_REMOTE_USER = server.username;
+		}
 		serverUtils.showRequestOptions(options);
 
 		var request = require('./requestUtils.js').request;
@@ -2038,7 +2074,7 @@ var _describeImportJob = function (server, id) {
 		var stem = server.url + '/system/export/api/v1/imports/' + id;
 		var url = stem;
 
-		url += '?fields=id,name,description,createdBy,createdAt,completedAt,progress,currentState,completed,reports';
+		url += '?fields=id,name,description,createdBy,createdAt,completedAt,progress,state,completed,reports';
 		url += ',source,source.archive,targets.select.type,targets.select.site,id,targets.select.site.name';
 		url += ',targets.select.site.channel.name,targets.select.site.channel.localizationPolicy.name,targets.select.site.defaultLanguage,targets.apply.policies';
 		url += ',targets.apply.createSite.site.repository,targets.apply.createSite.assetsPolicy';
@@ -2053,6 +2089,10 @@ var _describeImportJob = function (server, id) {
 				Authorization: serverUtils.getRequestAuthorization(server)
 			}
 		};
+		// Note: Export service on dev instances requires additional header
+		if (server.env === 'dev_ec') {
+			options.headers.IDCS_REMOTE_USER = server.username;
+		}
 		serverUtils.showRequestOptions(options);
 
 		var request = require('./requestUtils.js').request;
@@ -2337,6 +2377,120 @@ module.exports.deleteComponent = function (args) {
 	var server = args.server;
 	var showError = args.showError !== undefined ? args.showError : true;
 	return args.hard ? _hardDeleteResource(server, 'components', args.id, args.name, showError, args.showInfo) : _softDeleteResource(server, 'components', args.id, args.name);
+};
+
+var _restoreResource = function (server, type, id, name, showError, showInfo) {
+	return new Promise(function (resolve, reject) {
+
+		var url = '/sites/management/api/v1/' + type + '/';
+		if (id) {
+			url = url + id;
+		} else if (name) {
+			url = url + 'name:' + name;
+		}
+		url = url + '/undelete';
+		if (showInfo === undefined || showInfo) {
+			console.info(' - post ' + url);
+		}
+		var options = {
+			method: 'POST',
+			url: server.url + url,
+			headers: {
+				Authorization: serverUtils.getRequestAuthorization(server)
+			}
+		};
+
+		serverUtils.showRequestOptions(options);
+
+		var request = require('./requestUtils.js').request;
+		request.delete(options, function (error, response, body) {
+			if (error) {
+				if (showError) {
+					console.error('ERROR: failed to restore ' + type.substring(0, type.length - 1) + ' ' + (name || id) + ' (ecid: ' + response.ecid + ')');
+					console.error(error);
+				}
+				resolve({
+					err: error
+				});
+			}
+
+			var data;
+			try {
+				data = JSON.parse(body);
+			} catch (e) {
+				data = body;
+			}
+
+			if (response && response.statusCode < 300) {
+				resolve({
+					id: id,
+					name: name
+				});
+			} else {
+				var msg = (data && (data.detail || data.title)) ? (data.detail || data.title) : (response ? (response.statusMessage || response.statusCode) : '');
+				if (showError) {
+					console.error('ERROR: failed to restore ' + type.substring(0, type.length - 1) + ' ' + (name || id) + ' : ' + msg + ' (ecid: ' + response.ecid + ')');
+				}
+				resolve({
+					id: id,
+					name: name,
+					err: msg || 'err'
+				});
+			}
+
+		});
+	});
+};
+/**
+ * Restore a template on server
+ * @param {object} args JavaScript object containing parameters.
+ * @param {object} server the server object
+ * @param {string} id the id of the template or
+ * @param {string} name the name of the template
+ * @returns {Promise.<object>} The data object returned by the server.
+ */
+module.exports.restoreTemplate = function (args) {
+	var showError = args.showError !== undefined ? args.showError : true;
+	return _restoreResource(args.server, 'templates', args.id, args.name, showError, args.showInfo);
+};
+
+/**
+ * Restore a site on server
+ * @param {object} args JavaScript object containing parameters.
+ * @param {object} server the server object
+ * @param {string} id the id of the site or
+ * @param {string} name the name of the site
+ * @returns {Promise.<object>} The data object returned by the server.
+ */
+module.exports.restoreSite = function (args) {
+	var showError = args.showError !== undefined ? args.showError : true;
+	return _restoreResource(args.server, 'sites', args.id, args.name, showError, args.showInfo);
+};
+
+/**
+ * Restore a theme on server
+ * @param {object} args JavaScript object containing parameters.
+ * @param {object} server the server object
+ * @param {string} id the id of the theme or
+ * @param {string} name the name of the theme
+ * @returns {Promise.<object>} The data object returned by the server.
+ */
+module.exports.restoreTheme = function (args) {
+	var showError = args.showError !== undefined ? args.showError : true;
+	return _restoreResource(args.server, 'themes', args.id, args.name, showError, args.showInfo);
+};
+
+/**
+ * Restore a component on server
+ * @param {object} args JavaScript object containing parameters.
+ * @param {object} server the server object
+ * @param {string} id the id of the component or
+ * @param {string} name the name of the component
+ * @returns {Promise.<object>} The data object returned by the server.
+ */
+module.exports.restoreComponent = function (args) {
+	var showError = args.showError !== undefined ? args.showError : true;
+	return _restoreResource(args.server, 'components', args.id, args.name, showError, args.showInfo);
 };
 
 var _importComponent = function (server, name, fileId) {
@@ -2972,7 +3126,13 @@ var _copySite = function (server, sourceSiteName, name, description, sitePrefix,
 
 			if (response && response.statusCode === 202) {
 				var statusLocation = response.location;
-				console.info(' - copying site (job id: ' + statusLocation.substring(statusLocation.lastIndexOf('/') + 1) + ')');
+				var governanceEnabled = false;
+				if (statusLocation.indexOf('/requests/') > 0) {
+					governanceEnabled = true;
+					console.info(' - sending request');
+				} else {
+					console.info(' - copying site (job id: ' + statusLocation.substring(statusLocation.lastIndexOf('/') + 1) + ')');
+				}
 				var startTime = new Date();
 				var needNewLine = false;
 				var inter = setInterval(function () {
@@ -2989,6 +3149,12 @@ var _copySite = function (server, sourceSiteName, name, description, sitePrefix,
 							// console.log(data);
 							return resolve({
 								err: 'err'
+							});
+						} else if (governanceEnabled && data.progress === 'blocked') {
+							clearInterval(inter);
+							console.log(' - the request is awaiting approval');
+							return resolve({
+								status: 'pending'
 							});
 						} else if (data.completed && data.progress === 'succeeded') {
 							clearInterval(inter);

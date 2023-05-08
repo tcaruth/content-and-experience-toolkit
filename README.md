@@ -14,6 +14,50 @@ Templates and resources for development platforms.
 
 [react-starter-sites](react-starter-sites/) – A quick way to get started with React site development.
 
+
+# New in Release 23.4.2
+
+**Added**
+- `cec transfer-editorial-role` - Transfer editorial roles from one OCM server to another
+- `cec export-site` - Exports an Enterprise Site
+- `cec cancel-export-job` - Cancels a site export job
+- `cec delete-export-job` - Deletes a site export job
+- `cec list-export-jobs` - Lists site export jobs
+- `cec describe-export-job` - Lists the properties of a site export job
+- `cec import-site` - Imports an Enterprise Site
+- `cec cancel-import-job` - Cancels a site import job
+- `cec delete-import-job` - Deletes a site import job
+- `cec list-import-jobs` - Lists site import jobs
+- `cec describe-import-job` - Lists the properties of a site import job
+- `cec unblock-import-job` - Unblocks a site import job
+
+**Updated**
+- `cec create-component` - Now supports creating React and Preact local components
+
+
+# New in Release 23.4.1
+
+**Added**
+- `cec list-activities` - Can now list repository and channel activities on an OCM server
+
+**Updated**
+- `cec list-server-content-types` - Now has option to validate if custom field editors are properly set
+- `cec list` - Now also shows the total number of items in a site
+- `cec compile-template` - Added `--useFallbackLocale` option to allow the compile to use this locale’s page files if the requested page translation file does not exist.  If no value given, it will use the sites default locale pages as the fallback.
+
+
+# New in Release 23.3.3
+
+**Added**
+- `cec restore-trash` - restores the content in Trash on an OCM server
+
+**Updated**
+- `cec transfer-site-page` - supports transfer of new pages from source server to target server
+- `cec create-site-map` - add format xml-variants to include all of the language and region variants for each URL
+- `cec upload-folder` - allow upload folder to a shared folder
+- `cec upload-file` - allow upload file to a shared folder
+
+
 # New in Release 23.3.2
 
 **Added**

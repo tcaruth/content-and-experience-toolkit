@@ -24,6 +24,7 @@ var fs = require('fs'),
 	url = require('url'),
 	merge = require('deepmerge'),
 	request = require('request'),
+	SCSComponentAPI = require('./api/CompileComponentAPI'),
 	serverUtils = require('../../test/server/serverUtils'),
 	documentUtils = require('../document').utils,
 	ContentCompiler = require('./components/contentitem/contentcompiler');
@@ -59,6 +60,7 @@ var siteFolder, // Z:/sitespublish/SiteC/
 	targetDevice = '', // 'mobile' or 'desktop' (no value implies compile for both if RegEx is specified)
 	mobilePages = false, // whether we are compiling mobile pages
 	localeGroup = [], // list of locales to compile
+	useFallbackLocale, // locale to use is requested locale does not exist
 	folderProperties; // _folder.json values
 
 
@@ -143,17 +145,32 @@ function initialize() {
 function getAvailableLanguages() {
 	var defaultLanguage = rootSiteInfo && rootSiteInfo.properties && rootSiteInfo.properties.defaultLanguage;
 	var languages = [''];
-	var filePath = path.join(siteFolder, '');
-	var entries = fs.readdirSync(filePath);
-	(entries || []).forEach(function (entry) {
-		var index = entry.indexOf('_structure.json');
-		if (index > 0) {
-			var language = entry.substring(0, index);
-			languages.push(language);
-		}
-	});
 
-	trace("Available Languages: " + languages);
+	// if useLocaleFallback defined, and localeGroup, then add all languages in the localeGroup
+	// Note: The group list will be further filterd by fallbacks defined for locales within the site
+	if (useFallbackLocale && Array.isArray(localeGroup) && localeGroup.length > 0) {
+		localeGroup.forEach(function (entry) {
+			var locale = entry === defaultLanguage ? '' : entry;
+			if (languages.indexOf(locale) === -1) {
+				languages.push(locale);
+			}
+		});
+
+		trace("Group Languages: " + languages);
+	} else {
+		// else get list of available translations
+		var filePath = path.join(siteFolder, '');
+		var entries = fs.readdirSync(filePath);
+		(entries || []).forEach(function (entry) {
+			var index = entry.indexOf('_structure.json');
+			if (index > 0) {
+				var language = entry.substring(0, index);
+				languages.push(language);
+			}
+		});
+
+		trace("Available Languages: " + languages);
+	}
 
 	// remove any languages that have locale fallbacks
 	if (rootSiteInfo && rootSiteInfo.properties && rootSiteInfo.properties.localeFallbacks &&
@@ -228,21 +245,15 @@ function getFolderProperties() {
 
 // Read the structure.json
 function readStructure(locale) {
-	var prefix = locale ? (locale + '_') : '';
-
-	var filePath = path.join(siteFolder, prefix + "structure.json");
-	var structureJson = fs.readFileSync(filePath, {
-		encoding: 'utf8'
-	});
+	// get locale version of structure.json
+	var structureJson = getLocaleFileData(siteFolder, "structure.json", locale, true);
 	var structureObject = JSON.parse(structureJson) || {};
 
 	// Set site global variables here
 	var tempSiteInfo = structureObject.siteInfo && structureObject.siteInfo.base;
 	if (!tempSiteInfo) {
-		var siteInfoFilePath = path.join(siteFolder, prefix + "siteinfo.json");
-		tempSiteInfo = JSON.parse(fs.readFileSync(siteInfoFilePath, {
-			encoding: 'utf8'
-		})) || {};
+		var tempSiteInfoData = getLocaleFileData(siteFolder, "siteinfo.json", locale, true);
+		tempSiteInfo = JSON.parse(tempSiteInfoData) || {}; 
 	}
 	var tempStructure = structureObject.base || structureObject;
 
@@ -388,6 +399,51 @@ function produceSiteNavigationStructure(context) {
 	context.navRoot = navRoot;
 }
 
+function getLocaleFileData(resourcePath, fileName, locale, loadBaseFile) {
+	var filePath = path.join(resourcePath, (locale ? locale + "_" : '') + fileName);
+	var fileContent = '';
+
+	try {
+		// try to load the requested locale file
+		fileContent = fs.readFileSync(filePath, {
+			encoding: 'utf8'
+		});
+	} catch (localeErr) {
+		// if locale was defined and we failed to load the locale file and there is a locale fallback to try...
+		if (locale && localeErr && localeErr.code === 'ENOENT' && useFallbackLocale) {
+			// tell the user we failed to load the requested page locale version
+			compilationReporter.info({
+				message: 'failed to load file: ' + filePath + ' will use fallback locale page.'
+			});
+
+			// check if the locale fallback was set to: 'siteLocale'
+			// This is the value when the user does not define a specific locale with the --useFallbackLocale option
+			if (useFallbackLocale === 'siteLocale') {
+				// load the base file if requested, the base file may already have been loaded and they only want the locale version
+				if (loadBaseFile) {
+					filePath = path.join(resourcePath, fileName);
+
+					fileContent = fs.readFileSync(filePath, {
+						encoding: 'utf8'
+					});
+				}
+			} else {
+				// try to load the fallback locale version of the page
+				filePath = path.join(resourcePath, useFallbackLocale + "_" + fileName);
+
+				fileContent = fs.readFileSync(filePath, {
+					encoding: 'utf8'
+				});
+			}
+		} else {
+			// rethrow the error
+			throw localeErr;
+		}
+	}
+
+	return fileContent; 
+}
+
 function getPageData(context, pageId) {
 	trace('getPageData: pageId=' + pageId + ', locale=' + context.locale);
 
@@ -405,39 +461,39 @@ function getPageData(context, pageId) {
 	// Load the locale page data, if any
 	var localePageData;
 	if (context.locale) {
-		filePath = path.join(siteFolder, "pages", context.locale + "_" + pageId + ".json");
-		pageJson = fs.readFileSync(filePath, {
-			encoding: 'utf8'
-		});
-		localePageData = JSON.parse(pageJson);
-		localePageData = (localePageData && localePageData.base) || localePageData;
+		pageJson = getLocaleFileData(path.join(siteFolder, "pages"), pageId + ".json", context.locale);
 
-		// For Localized Page Data files we only expect a select list of "properties".  Filter out
-		// any others, including those that are null, since those were likely introduced by the server.
-		if (localePageData && localePageData.properties) {
-			var props = {},
-				propertyValue,
-				allowedProperties = [
-					"title",
-					"pageDescription",
-					"keywords",
-					"header",
-					"footer"
-				];
+		if (pageJson) {
+			localePageData = JSON.parse(pageJson);
+			localePageData = (localePageData && localePageData.base) || localePageData;
 
-			for (const propertyName of allowedProperties) {
-				propertyValue = localePageData.properties[propertyName];
-				if (typeof propertyValue === 'string') {
-					props[propertyName] = propertyValue;
+			// For Localized Page Data files we only expect a select list of "properties".  Filter out
+			// any others, including those that are null, since those were likely introduced by the server.
+			if (localePageData && localePageData.properties) {
+				var props = {},
+					propertyValue,
+					allowedProperties = [
+						"title",
+						"pageDescription",
+						"keywords",
+						"header",
+						"footer"
+					];
+
+				for (const propertyName of allowedProperties) {
+					propertyValue = localePageData.properties[propertyName];
+					if (typeof propertyValue === 'string') {
+						props[propertyName] = propertyValue;
+					}
 				}
+
+				localePageData.properties = props;
 			}
 
-			localePageData.properties = props;
-		}
-
-		// Layer the properties of the localePageData into the pageData
-		if (pageData.properties && localePageData.properties) {
-			mergeObjects(pageData.properties, localePageData.properties, true);
+			// Layer the properties of the localePageData into the pageData
+			if (pageData.properties && localePageData.properties) {
+				mergeObjects(pageData.properties, localePageData.properties, true);
+			}
 		}
 	}
 
@@ -494,7 +550,9 @@ async function compileThemeLayout(themeName, layoutName, pageData, pageInfo) {
 		if (useModuleCompiler) {
 			const { default: PageCompiler } = await import(url.pathToFileURL(moduleFile));
 			if (PageCompiler) {
-				pageCompiler = new PageCompiler();
+				pageCompiler = new PageCompiler({
+					SCSComponentAPI: compiler.getSCSCompileAPI().getSCSComponentAPI()
+				});
 			} else {
 				compilationReporter.error({
 					message: 'failed to import: "' + moduleFile,
@@ -502,6 +560,7 @@ async function compileThemeLayout(themeName, layoutName, pageData, pageInfo) {
 				});
 			}
 		} else {
+			// Note: we don't get the opportunity to set the value on create for non-module components
 			pageCompiler = require(compileFile);
 		}
 
@@ -883,6 +942,44 @@ function combineUrlSegments(segment1, segment2) {
 	}
 
 	return url;
+}
+
+function addUrlParams(pageUrl, urlParams) {
+	if (pageUrl && urlParams) {
+		// Preserve the existing hash fragment
+		var hash = '';
+		var hashIndex = pageUrl.indexOf('#');
+		if (hashIndex >= 0) {
+			hash = pageUrl.substring(hashIndex);
+			pageUrl = pageUrl.substring(0, hashIndex);
+		}
+
+		var joinChar = (pageUrl.indexOf('?') === -1) ? '?' : '&';
+		if (typeof urlParams === 'string') {
+			pageUrl += joinChar + urlParams;
+		} else if (typeof urlParams === 'object') {
+			Object.keys(urlParams).forEach(function (key) {
+				pageUrl += joinChar + encodeURIComponent(key) + '=' + encodeURIComponent(urlParams[key]);
+				joinChar = '&';
+			});
+		}
+
+		pageUrl += hash;
+	}
+
+	return pageUrl;
+}
+
+function addUrlFragment(pageUrl, fragment) {
+	if (pageUrl && fragment && (typeof fragment === 'string')) {
+		var hashIndex = pageUrl.indexOf('#');
+		if (hashIndex >= 0) {
+			pageUrl = pageUrl.substring(0, hashIndex);
+		}
+		pageUrl += "#" + encodeURIComponent(fragment);
+	}
+
+	return pageUrl;
 }
 
 function getTokenValue(token, evaluationContext) {
@@ -1353,11 +1450,13 @@ var compiler = {
 	},
 	getSCSCompileAPI: function () {
 		var self = this;
-		return {
+		var _scsComponentAPI;
+		var scsCompileAPI = {
 			navigationRoot: self.navigationRoot,
 			navigationCurr: self.navigationCurr,
 			structureMap: self.structureMap,
 			siteInfo: self.siteInfo,
+			pageInfo: self.pageInfo,
 			siteFolder: siteFolder,
 			componentsFolder: componentsFolder,
 			themesFolder: themesFolder,
@@ -1368,6 +1467,9 @@ var compiler = {
 			channelAccessToken: channelAccessToken,
 			deviceInfo: self.context.deviceInfo,
 			snippetOnly: creatingDetailPages && detailPageContentLayoutSnippet,
+			getSCSComponentAPI: function () {
+				return _scsComponentAPI;
+			},
 			/**
 			 * Get the contentClient object that can be used to make OCM Content REST calls
 			 * @memberof SCSCompileAPI 
@@ -1379,86 +1481,71 @@ var compiler = {
 			 *      console.log(contentClient.getInfo());
 			 *  });
 			 */
-			getContentClient: function (type) {
-				return new Promise(function (resolve, reject) {
-					var contentType = type === 'published' ? 'published' : defaultContentType,
-						clientKey = type || 'default',
-						contentSDK = require('../../test/server/npm/contentSDK.js'),
-						beforeSend = function () {
-							return true;
-						},
-						getLocalTemplateURL = '';
+			getContentClientSync: function (type) {
+				var contentType = type === 'published' ? 'published' : defaultContentType,
+					clientKey = type || 'default',
+					contentSDK = require('../../test/server/npm/contentSDK.js'),
+					beforeSend = function () {
+						return true;
+					};
 
-					// get/create the content client cache
-					self.contentClients = self.contentClients || {};
+				// get/create the content client cache
+				self.contentClients = self.contentClients || {};
 
-					// create the content client if it doesn't exist in the cache
-					if (!self.contentClients[clientKey]) {
-						var serverURL,
-							authorization = '';
+				// create the content client if it doesn't exist in the cache
+				if (!self.contentClients[clientKey]) {
+					var serverURL,
+						authorization = '';
 
-						if (server && server.username && server.password) {
-							// use the configured server
-							serverURL = server.url;
+					if (server && server.username && server.password) {
+						// use the configured server
+						serverURL = server.url;
 
-							// set the header
-							var requestAuth = serverUtils.getRequestAuth(server);
-							if (requestAuth.bearer) {
-								authorization = 'Bearer ' + requestAuth.bearer;
-							} else {
-								authorization = 'Basic ' + Buffer.from(requestAuth.user + ':' + requestAuth.password).toString('base64');
-							}
-							beforeSend = function (options) {
-								options.headers = options.headers || {};
-								options.headers.authorization = authorization;
-							};
-						} else if (process.env.CEC_TOOLKIT_SERVER) {
+						// set the header
+						var requestAuth = serverUtils.getRequestAuth(server);
+						if (requestAuth.bearer) {
+							authorization = 'Bearer ' + requestAuth.bearer;
+						} else {
+							authorization = 'Basic ' + Buffer.from(requestAuth.user + ':' + requestAuth.password).toString('base64');
+						}
+						beforeSend = function (options) {
+							options.headers = options.headers || {};
+							options.headers.authorization = authorization;
+						};
+					} else {
+						contentType = 'published'; // only support published URLs on local server
+
+						// setup the template to use when calls are made to the local server
+						if (process.env.CEC_TOOLKIT_SERVER) {
 							// no server, use the environment server
 							serverURL = 'http://' + process.env.CEC_TOOLKIT_SERVER + ':' + (process.env.CEC_TOOLKIT_PORT || '8085');
-							contentType = 'published'; // only support published URLs on local server
-
-							// set the template to use for the local server requests
-							getLocalTemplateURL = serverURL + '/templates/' + templateName;
 						} else {
 							// no server available, default
 							serverURL = 'http://localhost:8085';
-							contentType = 'published'; // only support published URLs on local server
-
-							// set the template to use for the local server requests
-							getLocalTemplateURL = serverURL + '/templates/' + templateName;
 						}
-
-						self.contentClients[type || 'default'] = contentSDK.createPreviewClient({
-							contentServer: serverURL,
-							authorization: authorization,
-							contentType: contentType,
-							beforeSend: beforeSend,
-							contentVersion: 'v1.1',
-							channelToken: channelAccessToken || '',
-							isCompiler: true
-						});
-
-						// override the expand macros function to use the compiler tokens expansion
-						// this is because the relative page URLs are only known to the compiler 
-						self.contentClients[type || 'default'].expandMacros = function (value) {
-							return resolveLinks(value, self.context, self.sitePrefix, true);
-						};
 					}
 
-					if (getLocalTemplateURL) {
-						// do a get on the template before proceeding to setup the template to use
-						// this is required so that the content REST calls know which template to query against
-						var options = {
-							url: getLocalTemplateURL
-						};
-						request(options, function (error, response, body) {
-							// this is just to wait for the template name to inserted into the server context via the URL, no need to check response
-							resolve(self.contentClients[clientKey]);
-						});
-					} else {
-						resolve(self.contentClients[clientKey]);
-					}
-				});
+					self.contentClients[type || 'default'] = contentSDK.createPreviewClient({
+						contentServer: serverURL,
+						authorization: authorization,
+						contentType: contentType,
+						beforeSend: beforeSend,
+						contentVersion: 'v1.1',
+						channelToken: channelAccessToken || '',
+						isCompiler: true
+					});
+
+					// override the expand macros function to use the compiler tokens expansion
+					// this is because the relative page URLs are only known to the compiler 
+					self.contentClients[type || 'default'].expandMacros = function (value) {
+						return resolveLinks(value, self.context, self.sitePrefix, true);
+					};
+				}
+
+				return self.contentClients[clientKey];
+			},
+			getContentClient: function (type) {
+				return Promise.resolve(this.getContentClientSync(type));
 			},
 			/**
 			 * Compile another content item, returning the HTML created by the content item's compiler.<br/>
@@ -1541,6 +1628,36 @@ var compiler = {
 			 */
 			getDetailPageId: function () {
 				return getDefaultPage(self.structureMap, self.navigationRoot, 'isDetailPage');
+			},
+			getPageLinkInfo: function (pageId, options) {
+				// get the page data for the detail page
+				var pageData = this.getPageLinkData(pageId);
+				var pageUrl = pageData && pageData.href;
+
+				// now add in any options values to the href
+				if ( pageUrl ) {
+					// get the entry in the navigation
+					var navNode = self.structureMap[pageId];
+
+					// Also, formulate a URL to a detail page (only support slug format)
+					if ( options && navNode.isDetailPage && options.contentItem && options.contentItem.slug) {
+						var dotPos = pageUrl.lastIndexOf( '.' );
+						var slashPos = pageUrl.lastIndexOf( '/' );
+
+						if ( dotPos > slashPos + 1 ) {
+							pageUrl = pageUrl.substring( 0, dotPos );
+						} 
+						pageUrl = pageUrl + '/' + options.contentItem.slug;
+					}
+
+					pageUrl = addUrlParams(pageUrl, options && options.queryParams); 
+					pageUrl = addUrlFragment(pageUrl, options && options.fragment); 
+
+					// update the URL entry in the page Data
+					pageData.href = pageUrl;
+				}
+
+				return pageData;
 			},
 			/**
 			 * Get the information to navigate to another page in the site.<br/>
@@ -1795,8 +1912,48 @@ var compiler = {
 				} else {
 					return Promise.resolve();
 				}
+			},
+			getCDNPrefix: function () {
+				compilationReporter.warn({
+					message: 'getCDNPrefix: CDN prefix not available during compile'
+				});
+				return '';
+			},
+			getContentUrlPrefix: function () {
+				return '<!--$SCS_CONTENT_URL-->';
+			},
+			getComponentCatalogUrlPrefix: function () {
+				return '<!--$SCS_COMP_CATALOG_URL-->';
+			},
+			getDistDirUrlPrefix: function () {
+				return '<!--$SCS_DIST_FOLDER-->';
+			},
+			getSitePathPrefix: function () {
+				return '<!--$SCS_SITE_PATH-->';
+			},
+			getSitePrefix: function () {
+				return self.sitePrefix;
+			},
+			getThemeDesignUrlPrefix: function () {
+				return '_scs_theme_root_/designs/_scs_design_name_';
+			},
+			getThemeUrlPrefix: function () {
+				return '_scs_theme_root_';
+			},
+			getCacheKey: function (keyName) {
+				return cacheKeys[keyName];
+			},
+			getDeviceInfo: function () {
+				return self.context.deviceInfo || {
+					isMobile: false
+				}; 
 			}
 		};
+
+		// create a new SCSComponentAPI based on the SCSCompileAPI
+		_scsComponentAPI = new SCSComponentAPI(scsCompileAPI);
+
+		return scsCompileAPI; 
 	},
 	compileComponentInstance: function (compId, compInstance) {
 		var self = this;
@@ -3255,6 +3412,40 @@ function writeCommonSiteInfo(context) {
 	writePage(fileName, js);
 };
 
+// this registers the template to use when running content queries with the local server
+var registerTemplateWithServer = function () {
+	if (server && server.username && server.password) {
+		// for remote server, nothing to do
+		return Promise.resolve();
+	} else {
+		return new Promise(function (resolve, reject) {
+			var serverURL;
+			var getLocalTemplateURL;
+
+			// setup the template to use when calls are made to the local server
+			if (process.env.CEC_TOOLKIT_SERVER) {
+				// no server, use the environment server
+				serverURL = 'http://' + process.env.CEC_TOOLKIT_SERVER + ':' + (process.env.CEC_TOOLKIT_PORT || '8085');
+			} else {
+				// no server available, default
+				serverURL = 'http://localhost:8085';
+			}
+
+			getLocalTemplateURL = serverURL + '/templates/' + templateName;
+
+			// do a get on the template before proceeding to setup the template to use
+			// this is required so that the content REST calls know which template to query against
+			var options = {
+				url: getLocalTemplateURL
+			};
+			request(options, function (error, response, body) {
+				// this is just to wait for the template name to inserted into the server context via the URL, no need to check response
+				resolve();
+			});
+		});
+	}
+};
+
 var compilePages = function (compileTargetDevice) {
 	if (!targetDevice) {
 		// no device type specified, if trying to compile mobile, check against RegEx
@@ -3347,6 +3538,7 @@ var compileSite = function (args) {
 	recurse = args.recurse;
 	includeLocale = args.includeLocale;
 	localeGroup = args.localeGroup ? args.localeGroup.split(',') : [];
+	useFallbackLocale = args.useFallbackLocale;
 	verbose = args.verbose;
 	useInlineSiteInfo = args.useInlineSiteInfo;
 	targetDevice = args.targetDevice;
@@ -3458,20 +3650,23 @@ var compileSite = function (args) {
 		defaultLocale = rootSiteInfo && rootSiteInfo.properties && rootSiteInfo.properties.defaultLanguage;
 	}
 
-	// compile pages for desktop 
-	return compilePages('desktop').then(function () {
-		console.log('');
+	// if using the local server, register the template that will be used for content queries
+	return registerTemplateWithServer().then(function () {
+		// compile pages for desktop 
+		return compilePages('desktop').then(function () {
+			console.log('');
 
-		// note that we're now compiling for mobile
-		process.env.scsIsMobile = true;
+			// note that we're now compiling for mobile
+			process.env.scsIsMobile = true;
 
-		// clear the detail page list so that it is re-created for mobile pages
-		detailPageList = {}; 
+			// clear the detail page list so that it is re-created for mobile pages
+			detailPageList = {}; 
 
-		// compile pages for mobile 
-		return compilePages('mobile').then(function () {
-			compilationReporter.renderReport();
-			return compilationReporter.hasErrors ? Promise.reject() : Promise.resolve();
+			// compile pages for mobile 
+			return compilePages('mobile').then(function () {
+				compilationReporter.renderReport();
+				return compilationReporter.hasErrors ? Promise.reject() : Promise.resolve();
+			});
 		});
 	});
 };

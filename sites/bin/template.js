@@ -7,6 +7,7 @@
  * Template library
  */
 var gulp = require('gulp'),
+	assetUtils = require('./asset.js').utils,
 	documentUtils = require('./document.js').utils,
 	contentUtils = require('./content.js').utils,
 	fileUtils = require('../test/server/fileUtils.js'),
@@ -106,7 +107,9 @@ var _createLocalTemplateFromSite = function (name, siteName, server, excludeCont
 			var repositoryName;
 			var site;
 			var contentTypeNames = [];
+			var allTypeNames = [];
 			var contentLayoutNames = [];
+			var types = [];
 			var typePromises = [];
 			var comps = [];
 			var contentDownloaded = false;
@@ -170,10 +173,33 @@ var _createLocalTemplateFromSite = function (name, siteName, server, excludeCont
 						}
 					});
 
-					console.info(' - content types: ' + contentTypeNames);
+
+					// get the reference types for all the types used by the site
+					var allTypesPromises = [];
+					if (!excludeType && contentTypeNames.length > 0) {
+						let names = [];
+						contentTypeNames.forEach(function (name) {
+							names.push({ name: name });
+						});
+						allTypesPromises.push(assetUtils.getAllTypes(server, names));
+					}
+
+					return Promise.all(allTypesPromises);
+				})
+				.then(function (results) {
+
+					console.info(' - content types:     ' + contentTypeNames);
 
 					// query content layout mappings if needed
 					if (!excludeType && contentTypeNames.length > 0) {
+						let allTypes = results && results[0] || [];
+						allTypes.forEach(function (type) {
+							if (!contentTypeNames.includes(type.name)) {
+								contentTypeNames.push(type.name);
+							}
+						});
+						console.info(' - all content types: ' + contentTypeNames);
+
 						contentTypeNames.forEach(function (typeName) {
 							typePromises.push(serverRest.getContentType({
 								server: server,
@@ -354,7 +380,8 @@ var _createLocalTemplateFromSite = function (name, siteName, server, excludeCont
 
 				})
 				.then(function (results) {
-					var types = results || [];
+					types = results || [];
+
 					if (!contentDownloaded && !excludeType && types.length > 0) {
 						var categoryLayoutMappings = [];
 						types.forEach(function (type) {
@@ -3148,6 +3175,7 @@ module.exports.compileTemplate = function (argv, done) {
 		secureSite = typeof argv.secureSite === 'boolean' ? argv.secureSite : argv.secureSite === 'true',
 		includeLocale = typeof argv.includeLocale === 'boolean' ? argv.includeLocale : argv.includeLocale === 'true',
 		localeGroup = argv.localeGroup || '',
+		useFallbackLocale = argv.useFallbackLocale,
 		noDetailPages = typeof argv.noDetailPages === 'boolean' ? argv.noDetailPages : argv.noDetailPages === 'true',
 		noDefaultDetailPageLink = typeof argv.noDefaultDetailPageLink === 'boolean' ? argv.noDefaultDetailPageLink : argv.noDefaultDetailPageLink === 'true',
 		contentLayoutSnippet = typeof argv.contentLayoutSnippet === 'boolean' ? argv.contentLayoutSnippet : argv.contentLayoutSnippet === 'true',
@@ -3214,6 +3242,7 @@ module.exports.compileTemplate = function (argv, done) {
 		contentLayoutSnippet: contentLayoutSnippet,
 		includeLocale: includeLocale,
 		localeGroup: localeGroup,
+		useFallbackLocale: useFallbackLocale,
 		logLevel: 'log',
 		outputURL: serverURL + '/templates/' + tempName + '/'
 	}).then(function (result) {
@@ -3243,6 +3272,7 @@ module.exports.compileContent = function (argv, done) {
 		targetDevice = argv.targetDevice || '',
 		contentIds = argv.assets && argv.assets.split(','),
 		contentType = argv.contenttype || '',
+		assetFile = argv.assetFile || '',
 		publishingJobId = argv.source === 'undefined' ? undefined : argv.source,
 		ignoreErrors = argv.ignoreErrors,
 		server;
@@ -3255,8 +3285,8 @@ module.exports.compileContent = function (argv, done) {
 	}
 
 
-	if (!contentIds && !publishingJobId && !contentType) {
-		console.error('ERROR: no publishing job ID, content IDs or content type defined');
+	if (!contentIds && !publishingJobId && !contentType && !assetFile) {
+		console.error('ERROR: no publishing job ID, content IDs, assetFile or content type defined');
 		done();
 		return;
 	}
@@ -3280,6 +3310,8 @@ module.exports.compileContent = function (argv, done) {
 		publishingJobId: publishingJobId,
 		renditionJobId: argv.renditionJobId,
 		repositoryId: argv.repositoryId,
+		assetFile: assetFile,
+		fileBoundary: argv.fileBoundary,
 		logLevel: 'log',
 		serverURL: serverURL
 	}).then(function (result) {
@@ -4218,7 +4250,7 @@ module.exports.unshareTemplate = function (argv, done) {
 /**
  * update template
  */
- module.exports.updateTemplate = function (argv, done) {
+module.exports.updateTemplate = function (argv, done) {
 	'use strict';
 
 	if (!verifyRun(argv)) {
@@ -4301,9 +4333,9 @@ module.exports.unshareTemplate = function (argv, done) {
 						done();
 					}
 				})
-				.catch((error) => {
-					done();
-				});
+					.catch((error) => {
+						done();
+					});
 			});
 		} else {
 			// local template
