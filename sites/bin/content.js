@@ -3,6 +3,7 @@
  * Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
  */
 
+const e = require('express');
 const { disconnect } = require('process');
 
 /**
@@ -14,7 +15,6 @@ var serverUtils = require('../test/server/serverUtils.js'),
 	sitesRest = require('../test/server/sitesRest.js'),
 	documentUtils = require('./document.js').utils,
 	fs = require('fs'),
-	fse = require('fs-extra'),
 	gulp = require('gulp'),
 	os = require('os'),
 	path = require('path'),
@@ -844,6 +844,9 @@ var _exportChannelContent = function (request, server, channelId, publishedasset
 									process.stdout.write(os.EOL);
 								}
 								// console.log(data);
+								if (data.summary && data.summary.contentItems) {
+									console.info(' - total exported items: ' + data.summary.contentItems.length);
+								}
 								var downloadLink = data.downloadLink[0].href;
 								if (downloadLink) {
 									options = {
@@ -859,6 +862,9 @@ var _exportChannelContent = function (request, server, channelId, publishedasset
 									// Download the export zip
 									console.info(' - downloading export ' + downloadLink);
 									startTime = new Date();
+									// 
+									// if download fails, retry and total up to 3 times
+
 									var writer = fs.createWriteStream(exportfilepath);
 									serverRest.executeGetStream({
 										server: server,
@@ -867,12 +873,56 @@ var _exportChannelContent = function (request, server, channelId, publishedasset
 										noMsg: true
 									})
 										.then(function (result) {
-
+											// console.log(result);
 											if (!result || result.err) {
-												console.error('ERROR: Failed to download');
-												return resolve({
-													err: 'err'
-												});
+												if (result.statusCode === 500 || result.statusMessage === 'Internal Server Error') {
+													// retry 1st time
+													console.info(' - retry downloading export ' + downloadLink);
+													serverRest.executeGetStream({
+														server: server,
+														endpoint: downloadLink,
+														writer: writer,
+														noMsg: true
+													}).then(function (result) {
+														if (!result || result.err) {
+															if (result.statusCode === 500 || result.statusMessage === 'Internal Server Error') {
+																// retry 2nd time
+																console.info(' - retry downloading export ' + downloadLink);
+																serverRest.executeGetStream({
+																	server: server,
+																	endpoint: downloadLink,
+																	writer: writer,
+																	noMsg: true
+																}).then(function (result) {
+																	if (!result || result.err) {
+																		console.error('ERROR: Failed to download');
+																		return resolve({
+																			err: 'err'
+																		});
+																	} else {
+																		console.info(' - download export file [' + serverUtils.timeUsed(startTime, new Date()) + ']');
+																		console.info(' - save export to ' + exportfilepath);
+																		return resolve({});
+																	}
+																})
+															} else {
+																console.error('ERROR: Failed to download');
+																return resolve({
+																	err: 'err'
+																});
+															}
+														} else {
+															console.info(' - download export file [' + serverUtils.timeUsed(startTime, new Date()) + ']');
+															console.info(' - save export to ' + exportfilepath);
+															return resolve({});
+														}
+													})
+												} else {
+													console.error('ERROR: Failed to download');
+													return resolve({
+														err: 'err'
+													});
+												}
 											} else {
 
 												console.info(' - download export file [' + serverUtils.timeUsed(startTime, new Date()) + ']');
@@ -1756,6 +1806,41 @@ module.exports.uploadContentFromTemplate = function (args) {
 		});
 };
 
+// Use DB query to get item ids from repositories and channels
+var _queryItemIds = function (server, repository, channel) {
+	return new Promise(function (resolve, reject) {
+
+		var channelId = channel ? channel.id : '';
+		var repoIds = [];
+		if (repository) {
+			repoIds.push(repository.id);
+		} else if (channel && channel.repositories) {
+			// no repository specified, use all repositories the channel is in
+			channel.repositories.forEach(function (repo) {
+				repoIds.push(repo.id);
+			});
+		}
+		console.info(' - repository: ' + repoIds + ' channel: ' + channelId);
+		var idPromises = [];
+		repoIds.forEach(function (repoId) {
+			idPromises.push(serverRest.getAllItemIds({ server: server, repositoryId: repoId, channelId }));
+		});
+
+		var ids = [];
+		Promise.all(idPromises).then(function (results) {
+			results.forEach(function (result) {
+				if (result && result.data && result.data.length > 0) {
+					result.data.forEach(function (item) {
+						ids.push(item.id);
+					});
+				}
+			});
+			return resolve(ids);
+		});
+
+	});
+};
+
 module.exports.controlContent = function (argv, done, sucessCallback, errorCallback, loginServer) {
 	'use strict';
 
@@ -1829,6 +1914,7 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 			var repositoryName = argv.repository;
 			var assetGUIDS = argv.assets ? argv.assets.split(',') : [];
 			assetGUIDS = assetGUIDS.concat(assetsInFile);
+			var assetIdsFromDB = [];
 			var query = argv.query;
 
 			var batchSize = argv.batchsize;
@@ -1841,6 +1927,8 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 			var toPublishItemIds = [];
 			var toSetTranslatedIds = [];
 			var hasPublishedItems = false;
+			var toReviewItemIds = [];
+			var toProcessReviewItemIds = [];
 
 			var repositoryPromises = [];
 			if (repositoryName) {
@@ -1866,7 +1954,7 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 						channelPromises.push(serverRest.getChannelWithName({
 							server: server,
 							name: channelName,
-							fields: 'publishPolicy,channelTokens'
+							fields: 'publishPolicy,channelTokens,repositories'
 						}));
 					}
 
@@ -1906,6 +1994,24 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 						}
 						collection = results[0].data;
 						console.info(' - get collection');
+					}
+
+					let idPromises = [];
+					if (assetGUIDS.length === 0) {
+						idPromises.push(_queryItemIds(server, repository, channel));
+					}
+
+					return Promise.all(idPromises);
+
+				})
+				.then(function (results) {
+
+					if (assetGUIDS.length === 0) {
+						assetIdsFromDB = results ? results[0] : [];
+						if (assetIdsFromDB.length > 0) {
+							console.info(' - total items in repostiory / channel: ' + assetIdsFromDB.length);
+							assetGUIDS = assetIdsFromDB;
+						}
 					}
 
 					//
@@ -2005,7 +2111,7 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 					} else {
 						var badGUIDS = [];
 						var goodItems = [];
-						if (assetGUIDS.length > 0) {
+						if (assetGUIDS.length > 0 && assetIdsFromDB.length === 0) {
 							assetGUIDS.forEach(function (id) {
 								var found = false;
 								for (var i = 0; i < items.length; i++) {
@@ -2021,8 +2127,7 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 							});
 
 							if (badGUIDS.length > 0) {
-								var label = action === 'add' ? 'repository' : (channel ? 'channel' : 'collection');
-								console.error('ERROR: asset ' + badGUIDS + ' not found in the ' + label);
+								console.warn('WARNING: asset ' + badGUIDS + ' not found in the item query');
 							}
 
 							if (goodItems.length === 0) {
@@ -2077,6 +2182,18 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 						if (item.translatable && !item.languageIsMaster && item.status === 'draft') {
 							toSetTranslatedIds.push(item.id);
 						}
+
+						if (item.status !== 'published' && item.status !== 'inReview' && item.status !== 'approved') {
+							toReviewItemIds.push(item.id);
+						}
+
+						if (action === 'approve' && (item.status === 'inReview' || item.status === 'rejected')) {
+							toProcessReviewItemIds.push(item.id);
+						}
+
+						if (action === 'reject' && (item.status === 'inReview' || item.status === 'approved')) {
+							toProcessReviewItemIds.push(item.id);
+						}
 					}
 
 					if (action === 'publish' && toPublishItemIds.length === 0) {
@@ -2098,6 +2215,29 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 							return Promise.reject();
 						} else {
 							console.info(' - total items to set as translated: ' + toSetTranslatedIds.length);
+						}
+					}
+
+					if (action === 'submit-for-review') {
+						console.info(' - items that are already published, approved or in review will not be submitted');
+
+						if (toReviewItemIds.length === 0) {
+							console.log(' - no item to submit for review');
+							exitCode = 2;
+							return Promise.reject();
+						} else {
+							console.info(' - total items to submit for review: ' + toReviewItemIds.length);
+						}
+					}
+
+					if (action === 'approve' || action === 'reject') {
+						console.info(' - only ' + action + ' items that are in review or ' + (action === 'approve' ? 'rejected' : 'approved'));
+						if (toProcessReviewItemIds.length === 0) {
+							console.log(' - no item to ' + action);
+							exitCode = 2;
+							return Promise.reject();
+						} else {
+							console.info(' - total items to ' + action + ': ' + toProcessReviewItemIds.length);
 						}
 					}
 
@@ -2285,6 +2425,30 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 							}
 						});
 
+					} else if (action === 'submit-for-review') {
+						let async = toReviewItemIds.length >= 100 ? 'true' : 'false';
+						opPromise = _performOneOp(server, action, '', toReviewItemIds, showError, async);
+						opPromise.then(function (result) {
+							if (result.err) {
+								return cmdEnd(done);
+							} else {
+								console.log(' - ' + toReviewItemIds.length + ' items submitted for review');
+								return cmdSuccess(done, true);
+							}
+						});
+
+					} else if (action === 'approve' || action === 'reject') {
+						let async = toProcessReviewItemIds.length >= 100 ? 'true' : 'false';
+						opPromise = _performOneOp(server, action, '', toProcessReviewItemIds, showError, async);
+						opPromise.then(function (result) {
+							if (result.err) {
+								return cmdEnd(done);
+							} else {
+								console.log(' - ' + toProcessReviewItemIds.length + ' items ' + (action === 'approve' ? 'approved' : 'rejected'));
+								return cmdSuccess(done, true);
+							}
+						});
+
 					} else {
 						console.error('ERROR: action ' + action + ' not supported');
 						return cmdEnd(done);
@@ -2345,7 +2509,31 @@ var _performOneOp = function (server, action, channelId, itemIds, showerror, asy
 				itemIds: itemIds,
 				async: async
 			});
+		} else if (action === 'submit-for-review') {
+			opPromise = serverRest.submitItemsForApproval({
+				server: server,
+				itemIds: itemIds,
+				async: async
+			});
+		} else if (action === 'approve') {
+			opPromise = serverRest.approveItems({
+				server: server,
+				itemIds: itemIds,
+				async: async
+			});
+		} else if (action === 'reject') {
+			opPromise = serverRest.rejectItems({
+				server: server,
+				itemIds: itemIds,
+				async: async
+			});
+		} else {
+			console.log(' - action ' + action + ' not supported');
+			return resolve({
+				err: 'err'
+			});
 		}
+
 		opPromise.then(function (result) {
 			if (result.err) {
 				return resolve({

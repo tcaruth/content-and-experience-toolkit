@@ -1,6 +1,6 @@
 {
 	"name": "cec-sites-toolkit",
-	"version": "23.4.2",
+	"version": "23.6.1",
 	"license": "UPL-1.0",
 	"description": "Oracle Content Management Toolkit helps you develop site templates, themes, custom components, and content layouts for Oracle Content Management.",
 	"main": "index.js",
@@ -64,6 +64,8 @@
 		"update-taxonomy": "gulp -LL --gulpfile bin/gulpfile.js update-taxonomy ",
 		"control-taxonomy": "gulp -LL --gulpfile bin/gulpfile.js control-taxonomy ",
 		"describe-taxonomy": "gulp -LL --gulpfile bin/gulpfile.js describe-taxonomy ",
+		"share-taxonomy": "gulp -LL --gulpfile bin/gulpfile.js share-taxonomy ",
+		"unshare-taxonomy": "gulp -LL --gulpfile bin/gulpfile.js unshare-taxonomy ",
 		"create-template": "gulp -LL --gulpfile bin/gulpfile.js create-template ",
 		"create-template-from-site": "gulp -LL --gulpfile bin/gulpfile.js create-template-from-site ",
 		"copy-template": "gulp -LL --gulpfile bin/gulpfile.js copy-template ",
@@ -114,6 +116,7 @@
 		"export-site": "gulp -LL --gulpfile bin/gulpfile.js export-site ",
 		"import-site": "gulp -LL --gulpfile bin/gulpfile.js import-site ",
 		"unblock-import-job": "gulp -LL --gulpfile bin/gulpfile.js unblock-import-job ",
+		"retry-import-job": "gulp -LL --gulpfile bin/gulpfile.js retry-import-job ",
 		"cancel-export-job": "gulp -LL --gulpfile bin/gulpfile.js cancel-export-job ",
 		"cancel-import-job": "gulp -LL --gulpfile bin/gulpfile.js cancel-import-job ",
 		"delete-export-job": "gulp -LL --gulpfile bin/gulpfile.js delete-export-job ",
@@ -166,6 +169,7 @@
 		"upload-localization-policy": "gulp -LL --gulpfile bin/gulpfile.js upload-localization-policy ",
 		"delete-assets": "gulp -LL --gulpfile bin/gulpfile.js delete-assets ",
 		"list-assets": "gulp -LL --gulpfile bin/gulpfile.js list-assets ",
+		"list-asset-ids": "gulp -LL --gulpfile bin/gulpfile.js list-asset-ids ",
 		"describe-asset": "gulp -LL --gulpfile bin/gulpfile.js describe-asset ",
 		"validate-assets": "gulp -LL --gulpfile bin/gulpfile.js validate-assets ",
 		"create-asset-usage-report": "gulp -LL --gulpfile bin/gulpfile.js create-asset-usage-report ",
@@ -222,7 +226,7 @@
 	],
 	"author": "Oracle",
 	"engines": {
-		"node": ">=14.0.0"
+		"node": ">=16.18.1"
 	},
 	"dependencies": {
 		"@oracle/oraclejet": "14.0.4",
@@ -232,9 +236,8 @@
 		"deepmerge": "4.3.1",
 		"express": "4.17.3",
 		"extract-zip": "2.0.1",
-		"fast-xml-parser": "4.0.12",
+		"fast-xml-parser": "4.2.4",
 		"form-data": "4.0.0",
-		"fs-extra": "10.0.0",
 		"gulp": "4.0.2",
 		"gulp-clean-css": "4.3.0",
 		"gulp-replace": "1.1.4",
@@ -244,7 +247,7 @@
 		"marked": "4.0.10",
 		"mocha": "10.1.0",
 		"mustache": "4.2.0",
-		"node-fetch": "2.6.7",
+		"node-fetch": "2.6.11",
 		"puppeteer": "15.3.1",
 		"request": "2.88.0",
 		"semver": "7.3.8",

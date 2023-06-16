@@ -15,6 +15,39 @@ Templates and resources for development platforms.
 [react-starter-sites](react-starter-sites/) – A quick way to get started with React site development.
 
 
+# New in Release 23.6.1
+
+**Added**
+- `cec share-taxonomy` - Share taxonomy with users and groups on an OCM server and assign a role
+- `cec unshare-taxonomy` - Delete user or group access to a taxonomy on an OCM server
+
+**Updated**
+- `cec register-server` - Now has option to get and store the OAuth token in server JSON file, user name and password will not be stored
+- `cec control-site` - Now has option to selectively publish site auxiliary files
+
+
+# New in Release 23.5.2
+
+**Added**
+- `cec list-asset-ids` - lists asset Ids
+- `cec control-content` - now supports `submit-for-review|approve|reject` to submit assets to workflow
+- `cec retry-import-job` - to retry an import job
+
+**Updated**
+- `cec describe-theme` - now also lists all of the theme layouts
+- `cec describe-site` - now lists the theme layouts usage
+
+
+# New in Release 23.5.1
+
+**Added**
+- `cec create-site-page` - Creates a new page for a site on an OCM server
+- `cec describe-site-page` - Lists the properties of a site page on an OCM server
+
+**Updated**
+- `cec validate-site` and `cec validate-assets` - Added option to save results to a JSON file
+
+
 # New in Release 23.4.2
 
 **Added**
