@@ -52,7 +52,7 @@ var _getResources = function (server, type, expand, offset) {
 				var items = data && data.items || [];
 				resolve(data);
 			} else {
-				console.error('ERROR: failed to get ' + type + ' : ' + (response ? (response.statusMessage + ' ' + response.statusCode) : '') + ' (ecid: ' + response.ecid + ')');
+				console.error('ERROR: failed to get ' + type + ' : ' + (response ? (response.statusMessage || response.statusCode) : '') + ' (ecid: ' + response.ecid + ')');
 				resolve({
 					err: (response ? (response.statusMessage || response.statusCode) : 'err')
 				});
@@ -83,8 +83,8 @@ var _getAllResources = function (server, type, expand) {
 				}
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise
-			_getResources(server, type, expand));
+		// Start with a previousPromise value that is a resolved promise
+		_getResources(server, type, expand));
 
 		doGetResources.then(function (result) {
 			// console.log(resources.length);
@@ -1234,7 +1234,7 @@ module.exports.publishComponent = function (args) {
 	}
 };
 
-var _publishResourceAsync = function (server, type, id, name, usedContentOnly, compileSite, staticOnly, compileOnly, fullpublish, deletestaticfiles) {
+var _publishResourceAsync = function (server, type, id, name, usedContentOnly, compileSite, staticOnly, compileOnly, fullpublish, deletestaticfiles, staticincremental) {
 	return new Promise(function (resolve, reject) {
 
 		var url = '/sites/management/api/v1/' + type + '/';
@@ -1268,6 +1268,10 @@ var _publishResourceAsync = function (server, type, id, name, usedContentOnly, c
 			}
 			if (staticOnly) {
 				body.onlyStaticFiles = true;
+
+				if (staticincremental || process.env.CEC_TOOLKIT_INCREMENTAL_COMPILE_FILE) {
+					body.selectiveStaticPublish = true;
+				}
 			}
 			if (compileOnly) {
 				body.onlyStaticFiles = true;
@@ -1381,7 +1385,7 @@ module.exports.publishTheme = function (args) {
 module.exports.publishSite = function (args) {
 	var server = args.server;
 	return _publishResourceAsync(server, 'sites', args.id, args.name,
-		args.usedContentOnly, args.compileSite, args.staticOnly, args.compileOnly, args.fullpublish, args.deletestaticfiles
+		args.usedContentOnly, args.compileSite, args.staticOnly, args.compileOnly, args.fullpublish, args.deletestaticfiles, args.staticincremental
 	);
 };
 
@@ -1863,7 +1867,7 @@ var _pollImportSiteJob = function (server, statusUrl, resolve, reject, response)
  * @param {object} args
  * @returns
  */
- module.exports.pollImportJobStatus = function (args) {
+module.exports.pollImportJobStatus = function (args) {
 	return new Promise(function (resolve, reject) {
 
 		var server = args.server,
@@ -1903,44 +1907,44 @@ var _importSite = function (server, name, archiveId, siteId, repositoryId, local
 		};
 
 		switch (policies) {
-			case 'createSite':
-				payload.targets[0].apply.createSite = {
-					"assetsPolicy": assetspolicy,
-					"site": {
-						"repository": {
-							"id": repositoryId
+		case 'createSite':
+			payload.targets[0].apply.createSite = {
+				"assetsPolicy": assetspolicy,
+				"site": {
+					"repository": {
+						"id": repositoryId
+					}
+				}
+			}
+			break;
+		case 'updateSite':
+			payload.targets[0].apply.updateSite = {
+				"assetsPolicy": assetspolicy,
+				"site": {
+					"repository": {
+						"id": repositoryId
+					}
+				}
+			}
+			break;
+		case 'duplicateSite':
+			payload.targets[0].apply.duplicateSite = {
+				"assetsPolicy": 'duplicate',
+				"site": {
+					"name": newsite,
+					"sitePrefix": sitePrefix,
+					"repository": {
+						"id": repositoryId
+					},
+					channel: {
+						"localizationPolicy": {
+							"id": localizationPolicyId
 						}
 					}
 				}
-				break;
-			case 'updateSite':
-				payload.targets[0].apply.updateSite = {
-					"assetsPolicy": assetspolicy,
-					"site": {
-						"repository": {
-							"id": repositoryId
-						}
-					}
-				}
-				break;
-			case 'duplicateSite':
-				payload.targets[0].apply.duplicateSite = {
-					"assetsPolicy": 'duplicate',
-					"site": {
-						"name": newsite,
-						"sitePrefix": sitePrefix,
-						"repository": {
-							"id": repositoryId
-						},
-						channel: {
-							"localizationPolicy": {
-								"id": localizationPolicyId
-							}
-						}
-					}
-				}
-				break;
-			default:
+			}
+			break;
+		default:
 		}
 
 		// console.info(' - Import Site payload ' + JSON.stringify(payload));
@@ -2617,7 +2621,6 @@ var _getBackgroundJobStatus = function (server, url) {
 		request.get(options, function (error, response, body) {
 
 			if (error) {
-				console.info('_getBackgroundJobStatus error fetching from options.url ' + options.url);
 				console.error('ERROR: failed to get status from ' + endpoint + ' (ecid: ' + response.ecid + ')');
 				console.error(error);
 				resolve({
@@ -2636,7 +2639,6 @@ var _getBackgroundJobStatus = function (server, url) {
 			if (response && response.statusCode === 200) {
 				resolve(data);
 			} else {
-				console.info('_getBackgroundJobStatus  error in response fetching from options.url ' + options.url);
 				var msg = (data && (data.detail || data.title)) ? (data.detail || data.title) : (response ? (response.statusMessage || response.statusCode) : '');
 				console.error('ERROR: failed to get status from ' + endpoint + ' : ' + msg + ' (ecid: ' + response.ecid + ')');
 				resolve({
@@ -2961,7 +2963,11 @@ var _createSite = function (server, name, description, sitePrefix, templateName,
 					governanceEnabled = true;
 					console.info(' - sending request');
 				} else {
-					console.info(' - creating site (job id: ' + statusLocation.substring(statusLocation.lastIndexOf('/') + 1) + ')');
+					let job_id = statusLocation.substring(statusLocation.lastIndexOf('/') + 1)
+					if (process.shim) {
+						job_id = `[!--dsbj--]${job_id}[/!--dsbj--]`;
+					}
+					console.info(' - creating site (job id: ' + job_id + ')');
 				}
 				var startTime = new Date();
 				var needNewLine = false;

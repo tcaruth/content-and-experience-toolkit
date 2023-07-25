@@ -33,9 +33,13 @@ var distFolder;
 
 /**
  * Verify the source structure before proceed the command
- * @param {*} done 
+ * @param {*} done
  */
 var verifyRun = function (argv) {
+
+	if (process.shim) {
+		return true;
+	}
 	projectDir = argv.projectDir;
 
 	var srcfolder = serverUtils.getSourceFolder(projectDir);
@@ -134,7 +138,7 @@ module.exports.downloadContent = function (argv, done) {
 			done();
 			return;
 		}
-		// console.log(' - total asset GUIDs in file ' + assetsFile + ': ' + assetsInFile.length);
+		console.info(' - total asset GUIDs in file ' + assetsFile + ': ' + assetsInFile.length);
 		assetGUIDS = assetGUIDS.concat(assetsInFile);
 	}
 
@@ -174,17 +178,21 @@ var _downloadContent = function (server, channel, name, publishedassets, approve
 
 		var channelId = '';
 		var channelName = '';
+		var channelRepoId;
 		var repository, collection;
 		var q = '';
 		var guids = [];
 		var exportfilepath;
 		var contentPath;
+		var dbAssetGUIDS = [];
+		var requireItemSearch;
 
 		var channelPromises = [];
 		if (channel) {
 			channelPromises.push(serverRest.getChannelWithName({
 				server: server,
-				name: channel
+				name: channel,
+				fields: 'repositories'
 			}));
 		}
 		Promise.all(channelPromises)
@@ -198,13 +206,14 @@ var _downloadContent = function (server, channel, name, publishedassets, approve
 
 					channelId = results[0].data.id;
 					channelName = results[0].data.name;
+					channelRepoId = results[0].data.repositories && results[0].data.repositories[0] ? results[0].data.repositories[0].id : '';
 
 					if (!channelId) {
 						console.error('ERROR: channel ' + channel + ' does not exist');
 						return Promise.reject();
 					}
 
-					console.info(' - validate channel ' + channelName + ' (id: ' + channelId + ')');
+					console.info(' - validate channel ' + channelName + ' (id: ' + channelId + (channelRepoId ? ' repository: ' + channelRepoId : '') + ')');
 				}
 
 				var repositoryPromises = [];
@@ -218,7 +227,6 @@ var _downloadContent = function (server, channel, name, publishedassets, approve
 				return Promise.all(repositoryPromises);
 			})
 			.then(function (results) {
-				var collectionPromises = [];
 
 				if (repositoryName) {
 					if (!results || !results[0] || results[0].err || !results[0].data) {
@@ -227,14 +235,42 @@ var _downloadContent = function (server, channel, name, publishedassets, approve
 					}
 
 					repository = results[0].data;
+					console.info(' - validate repository (id: ' + repository.id + ')');
+				}
 
-					console.info(' - validate repository');
+				// if repository is specified, query DB to get accurate asset IDs
+				let assetIdsFromDBPromises = [];
+				if (channelRepoId || repository) {
+					assetIdsFromDBPromises.push(serverRest.getAllItemIds({
+						server: server,
+						repositoryId: repository && repository.id || channelRepoId,
+						channelId: channelId,
+						publishedassets: publishedassets
+					}));
+				}
+
+				return Promise.all(assetIdsFromDBPromises);
+
+			})
+			.then(function (results) {
+
+				if (channelRepoId || repository) {
+					// result in format of
+					// [{id: ''}, ..., {id: ''}]
+					dbAssetGUIDS = results && results[0] && results[0].data || [];
+					console.info(' - total assets in repostiory / channel: ' + dbAssetGUIDS.length);
+				}
+
+				// require item search to get items
+				requireItemSearch = collection || query || approvedassets || dbAssetGUIDS.length === 0;
+
+				var collectionPromises = [];
+				if (repository) {
 					collectionPromises.push(serverRest.getCollections({
 						server: server,
 						repositoryId: repository.id
 					}));
 				}
-
 				return Promise.all(collectionPromises);
 
 			})
@@ -261,51 +297,54 @@ var _downloadContent = function (server, channel, name, publishedassets, approve
 					console.info(' - validate collection');
 				}
 
-				if (query || repository || collection || (assetGUIDS && assetGUIDS.length > 0)) {
-					q = '';
-					if (repository) {
-						q = '(repositoryId eq "' + repository.id + '")';
+				q = '';
+				if (repository) {
+					q = '(repositoryId eq "' + repository.id + '")';
+				}
+				if (collection) {
+					if (q) {
+						q = q + ' AND ';
 					}
-					if (collection) {
-						if (q) {
-							q = q + ' AND ';
-						}
-						q = '(collections co "' + collection.id + '")';
+					q = '(collections co "' + collection.id + '")';
+				}
+				if (query) {
+					if (q) {
+						q = q + ' AND ';
 					}
-					if (query) {
-						if (q) {
-							q = q + ' AND ';
-						}
-						q = q + '(' + query + ')';
-					}
-
-					if (publishedassets) {
-						if (q) {
-							q = q + ' AND ';
-						}
-						q = q + 'isPublished eq "true" AND publishedChannels co "' + channelId + '"';
-					} else {
-						if (channelId) {
-							if (q) {
-								q = q + ' AND ';
-							}
-							q = q + '(channels co "' + channelId + '")';
-						}
-					}
-					console.info(' - query: ' + q);
+					q = q + '(' + query + ')';
 				}
 
-				return _queryItems(server, q, assetGUIDS, 'name,typeCategory');
+				if (publishedassets) {
+					if (q) {
+						q = q + ' AND ';
+					}
+					q = q + 'isPublished eq "true" AND publishedChannels co "' + channelId + '"';
+				} else {
+					if (channelId) {
+						if (q) {
+							q = q + ' AND ';
+						}
+						q = q + '(channels co "' + channelId + '")';
+					}
+				}
+
+				if (requireItemSearch) {
+					console.info(' - query: ' + q);
+				}
+				var itemSearchPromises = requireItemSearch ? [_queryItems(server, q, assetGUIDS, 'name,typeCategory')] : [];
+
+				return Promise.all(itemSearchPromises);
 
 			})
-			.then(function (result) {
+			.then(function (results) {
 
 				var guidAndTypes = [];
-				if (query || repository || collection || (assetGUIDS && assetGUIDS.length > 0)) {
-
-					var items = result || [];
+				var items = requireItemSearch ? (results && results[0] || []) : dbAssetGUIDS;
+				if (requireItemSearch) {
 					console.info(' - total items from query: ' + items.length);
+				}
 
+				if (items.length > 0) {
 					if (assetGUIDS && assetGUIDS.length > 0) {
 						var notFoundAssets = [];
 						assetGUIDS.forEach(function (id) {
@@ -342,21 +381,19 @@ var _downloadContent = function (server, channel, name, publishedassets, approve
 							guids.push(items[i].id);
 							guidAndTypes.push({
 								id: items[i].id,
-								typeCategory: items[i].typeCategory
+								typeCategory: items[i].typeCategory || ''
 							});
 						}
 					}
 				} else {
 					guids = assetGUIDS;
 				}
-				if (assetGUIDS && assetGUIDS.length > 0 || q) {
-					if (q) {
-						console.info(' - total items to export: ' + guids.length);
-					}
-					if (guids.length === 0) {
-						console.error('ERROR: no asset to export');
-						return Promise.reject();
-					}
+
+				console.info(' - total items to export: ' + guids.length);
+
+				if (guids.length === 0) {
+					console.error('ERROR: no asset to export');
+					return Promise.reject();
 				}
 
 				var approvedPromises = [];
@@ -431,7 +468,7 @@ var _downloadContent = function (server, channel, name, publishedassets, approve
 	});
 };
 
-var _queryItemsWithIds = function (server, qstr, assetGUIDS, fields) {
+var _queryItemsWithIds = function (server, qstr, assetGUIDS, fields, useDelivery, channelToken) {
 	return new Promise(function (resolve, reject) {
 		var items = [];
 		if (assetGUIDS.length === 0) {
@@ -483,12 +520,14 @@ var _queryItemsWithIds = function (server, qstr, assetGUIDS, fields) {
 						server: server,
 						q: q,
 						fields: fields,
-						showTotal: false
+						showTotal: false,
+						useDelivery: useDelivery,
+						channelToken: channelToken
 					}).then(function (result) {
 						if (result && result.data && result.data.length > 0) {
 							items = items.concat(result.data);
 							if (console.showInfo()) {
-								process.stdout.write(' - validating items ' + items.length +
+								process.stdout.write(' - querying items ' + items.length +
 									' [' + serverUtils.timeUsed(startTime, new Date()) + ']');
 								readline.cursorTo(process.stdout, 0);
 								needNewLine = true;
@@ -498,8 +537,8 @@ var _queryItemsWithIds = function (server, qstr, assetGUIDS, fields) {
 
 				});
 			},
-				// Start with a previousPromise value that is a resolved promise 
-				Promise.resolve({}));
+			// Start with a previousPromise value that is a resolved promise
+			Promise.resolve({}));
 
 			doQueryItems.then(function (result) {
 				if (needNewLine) {
@@ -634,8 +673,8 @@ var _queryApprovedItems = function (server, items) {
 
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise
-			Promise.resolve({}));
+		// Start with a previousPromise value that is a resolved promise
+		Promise.resolve({}));
 
 		doGetItems.then(function (result) {
 			resolve(approvedItems);
@@ -709,7 +748,7 @@ var _getChannelsFromServer = function (server) {
 
 /**
  * Call CAAS to create and export content template
- * @param {*} channelId 
+ * @param {*} channelId
  */
 var _exportChannelContent = function (request, server, channelId, publishedassets, assetGUIDS, exportfilepath, requiredContentTemplateName) {
 	var exportPromise = new Promise(function (resolve, reject) {
@@ -862,7 +901,7 @@ var _exportChannelContent = function (request, server, channelId, publishedasset
 									// Download the export zip
 									console.info(' - downloading export ' + downloadLink);
 									startTime = new Date();
-									// 
+									//
 									// if download fails, retry and total up to 3 times
 
 									var writer = fs.createWriteStream(exportfilepath);
@@ -1058,7 +1097,7 @@ var _uploadContentFromZip = function (args) {
 	return new Promise(function (resolve, reject) {
 		//
 		// create the content zip file
-		// 
+		//
 		var exportzippath = path.join(contentpath, 'export.zip');
 		gulp.src([contentpath + '/**', '!' + exportzippath])
 			.pipe(zip(contentfilename, {
@@ -1103,7 +1142,7 @@ var _uploadContentFromZipFile = function (args) {
 
 	return new Promise(function (resolve, reject) {
 
-		// 
+		//
 		// upload content zip file
 		//
 		var createFilePromise = serverRest.createFile({
@@ -1929,6 +1968,8 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 			var hasPublishedItems = false;
 			var toReviewItemIds = [];
 			var toProcessReviewItemIds = [];
+			var q = '';
+			var queryTotal;
 
 			var repositoryPromises = [];
 			if (repositoryName) {
@@ -2018,7 +2059,6 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 					// get items in the channel or collection
 					//
 					// query items
-					var q = '';
 					if (action === 'add') {
 						if (repository) {
 							q = '(repositoryId eq "' + repository.id + '")';
@@ -2059,12 +2099,26 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 						console.info(' - q: ' + q);
 					}
 
-					var queryPromise = assetGUIDS.length > 0 ?
+					return serverRest.queryItems({
+						server: server,
+						q: q,
+						fields: 'name,status,isPublished,publishedChannels,languageIsMaster,translatable',
+						limit: 1,
+						showTotal: false
+					});
+
+				})
+				.then(function (result) {
+					queryTotal = result.limit;
+					console.info(' - total items from query: ' + queryTotal);
+
+					var queryPromise = queryTotal > 500 && assetGUIDS.length > 0 ?
 						_queryItemsWithIds(server, q, assetGUIDS, 'name,status,isPublished,publishedChannels,languageIsMaster,translatable') :
 						serverRest.queryItems({
 							server: server,
 							q: q,
-							fields: 'name,status,isPublished,publishedChannels,languageIsMaster,translatable'
+							fields: 'name,status,isPublished,publishedChannels,languageIsMaster,translatable',
+							showTotal: false
 						});
 
 
@@ -2075,7 +2129,7 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 						return Promise.reject();
 					}
 
-					var items = assetGUIDS.length > 0 ? (result || []) : (result.data || []);
+					var items = queryTotal > 500 && assetGUIDS.length > 0 ? (result || []) : (result.data || []);
 					if (items.length === 0) {
 						if (showDetail) {
 							if (action === 'set-translated') {
@@ -2247,7 +2301,7 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 						if (dateToPublish) {
 							var dateObj = new Date(dateToPublish);
 
-							// make sure we had a valid date 
+							// make sure we had a valid date
 							if (isNaN(dateObj.valueOf())) {
 								console.error('ERROR: invalid date - "' + dateToPublish + '"');
 								return cmdEnd(done);
@@ -2326,7 +2380,7 @@ module.exports.controlContent = function (argv, done, sucessCallback, errorCallb
 									if (repositoryName) {
 										cmd += ' -r "' + repositoryName + '"';
 									}
-									cmd += ' -c ' + channelName;
+									cmd += ' -c "' + channelName + '"';
 									if (serverName) {
 										cmd += ' -s ' + serverName;
 									}
@@ -3156,7 +3210,7 @@ var _getDocumentForAssets = function (server, sources) {
 					});
 			});
 		},
-			Promise.resolve({})
+		Promise.resolve({})
 		);
 
 		doGetDoc.then(function (result) {
@@ -3191,7 +3245,7 @@ var _createDigitalAssets = function (server, repositoryId, type, srcFiles, attri
 				});
 			});
 		},
-			Promise.resolve({})
+		Promise.resolve({})
 		);
 
 		doCreateAsset.then(function (result) {
@@ -3234,7 +3288,7 @@ var _createDigitalAssetsFromDocuments = function (server, repositoryId, type, sr
 				});
 			});
 		},
-			Promise.resolve({})
+		Promise.resolve({})
 		);
 
 		doCreateAsset.then(function (result) {
@@ -4365,7 +4419,7 @@ module.exports.transferSiteContent = function (argv, done) {
 			}
 			items = result;
 
-			// query items from other repository 
+			// query items from other repository
 			return _getSiteAssetsFromOtherRepos(server, channelId, site.repository.id, publishedassets);
 
 		})
@@ -4937,8 +4991,8 @@ var _getMasterItems = function (server, items) {
 
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise 
-			Promise.resolve({}));
+		// Start with a previousPromise value that is a resolved promise
+		Promise.resolve({}));
 
 		doQueryItems.then(function (result) {
 			if (masterItems.length > 0 && console.showInfo()) {
@@ -5271,8 +5325,8 @@ var _getItemsWithRenditions = function (server, items) {
 				});
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise 
-			Promise.resolve({}));
+		// Start with a previousPromise value that is a resolved promise
+		Promise.resolve({}));
 
 		doQueryItems.then(function (result) {
 			if (needNewLine) {
@@ -5295,7 +5349,7 @@ var _transferRenditions = function (server, destServer, items, idcToken) {
 		var needNewLine = false;
 		var doTransferRendition = items.reduce(function (itemPromise, item) {
 			return itemPromise.then(function (result) {
-				// get the item's version on the target server, 
+				// get the item's version on the target server,
 				// have to query for each rendition to get the accurate version
 				var rendition = item.rendition;
 				return serverRest.getItem({
@@ -5400,8 +5454,8 @@ var _transferRenditions = function (server, destServer, items, idcToken) {
 
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise 
-			Promise.resolve({}));
+		// Start with a previousPromise value that is a resolved promise
+		Promise.resolve({}));
 
 		doTransferRendition.then(function (result) {
 			if (needNewLine) {

@@ -171,6 +171,26 @@ module.exports.getConfiguredServer = function (currPath, showError) {
 	return _getConfiguredServer(currPath, showError);
 };
 var _getConfiguredServer = function (currPath, showError) {
+	if (process.shim) {
+		// if under webbrowser , return current server where toolkit is loaded
+		return  {
+			fileloc: 'cec.properties',
+			fileexist: true,
+			configured: true,
+			//use dev instance as base url if under dev
+			url: document.location.origin.includes('localhost') ? "http://ssvrint-oracle.us.oracle.com/" : document.location.origin,
+			username: 'ssvrint.SitesAdmin1.admin',
+			password: 'welcome1',
+			oauthtoken: '',
+			env: 'dev_ec',
+			useRest: false,
+			idcs_url: '',
+			client_id: '',
+			client_secret: '',
+			scope: ''
+		};
+
+	}
 	var configFile;
 	if (process.env.CEC_PROPERTIES) {
 		configFile = process.env.CEC_PROPERTIES;
@@ -387,18 +407,25 @@ var _getRequestAuth = function (server) {
  * Return the Authorization for request headers
  * @param server the object obtained from API getConfiguredServer()
  */
-module.exports.getRequestAuthorization = function (server) {
-	return _getRequestAuthorization(server);
+module.exports.getRequestAuthorization = function (server, showError) {
+	return _getRequestAuthorization(server, showError);
 };
-var _getRequestAuthorization = function (server) {
+var _getRequestAuthorization = function (server, showError) {
 	var auth;
 
 	if (server.env === 'content_sdk') {
 		// for ContentSDK server, the oauthtoken contains the authorization value
 		auth = server.oauthtoken;
+	} else if (server.env === 'dev_ec' || (server.env === 'pod_pw' && !server.oauthtoken)) {
+		// for pw envs, use basic auth if no oauthtoken saved yet
+		auth = 'Basic ' + _btoa(server.username + ':' + server.password);
 	} else {
-		// create the authorization
-		auth = server.env === 'dev_ec' || !server.oauthtoken ? ('Basic ' + _btoa(server.username + ':' + server.password)) : ((server.tokentype || 'Bearer') + ' ' + server.oauthtoken);
+		// POD, use OAUTH token
+		let showMsg = showError === undefined ? true : showError
+		if (!server.oauthtoken && showMsg) {
+			console.error('ERROR: the OAuth token is no longer available');
+		}
+		auth = server.oauthtoken ? ((server.tokentype || 'Bearer') + ' ' + server.oauthtoken) : 'Bearer anonymous';
 	}
 
 	return auth;
@@ -995,13 +1022,16 @@ var _getTemplateComponents = function (templateName, includeThemeComps) {
 		});
 	};
 	for (var i = 0; i < pages.length; i++) {
-		var pagepath = path.join(tempSrcDir, 'pages', pages[i])
-		if (pagepath.includes('.DS_Store')) {
-			continue;
+		var pagepath = path.join(tempSrcDir, 'pages', pages[i]),
+			pagestr = fs.readFileSync(pagepath);
+
+		var pagejson;
+		try {
+			pagejson = JSON.parse(pagestr);
+		} catch (e) {
+			// handle invalid files in pages folder
 		}
-		var pagestr = fs.readFileSync(pagepath)
-		var pagejson = JSON.parse(pagestr)
-		if (pagejson.componentInstances) {
+		if (pagejson && pagejson.componentInstances) {
 			processInstances(pagejson.componentInstances);
 		}
 	}
@@ -1573,7 +1603,7 @@ module.exports.getCaasCSRFToken = function (server) {
 			if (response && response.statusCode === 200) {
 				return resolve(data);
 			} else {
-				var msg = data ? (data.title || data.errorMessage) : (response.statusMessage || response.statusCode);
+				var msg = data && (data.title || data.errorMessage) ? (data.title || data.errorMessage) : (response.statusMessage || response.statusCode);
 				console.error('ERROR: failed to get CSRF token ' + msg);
 				return resolve({
 					err: 'err'
@@ -2010,7 +2040,8 @@ module.exports.getOAuthTokenFromIDCS = function (server) {
 	return _getOAuthTokenFromIDCS(server);
 };
 
-var _getOAuthTokenFromIDCS = function (server) {
+var _getOAuthTokenFromIDCS = function (server, showMsg) {
+	var output = showMsg === undefined ? true : showMsg;
 	var tokenPromise = new Promise(function (resolve, reject) {
 		if (!server.url || !server.username || !server.password) {
 			console.error('ERROR: no server is configured');
@@ -2093,7 +2124,9 @@ var _getOAuthTokenFromIDCS = function (server) {
 				server.oauthtoken = token;
 				server.login = true;
 				server.tokentype = data.token_type;
-				console.info(' - connect to remote server: ' + server.url);
+				if (output) {
+					console.info(' - connect to remote server: ' + server.url);
+				}
 				return resolve({
 					status: true,
 					oauthtoken: token
@@ -2248,7 +2281,8 @@ var _getThemeComponents = function (themeName) {
 };
 
 
-var _loginToDevServer = function (server) {
+var _loginToDevServer = function (server, showMsg) {
+	var output = showMsg === undefined ? true : showMsg;
 	var loginPromise = new Promise(function (resolve, reject) {
 		// open user session
 
@@ -2287,7 +2321,9 @@ var _loginToDevServer = function (server) {
 				});
 			} else {
 				if (!loginReported) {
-					console.info(' - Logged in to remote server: ' + server.url);
+					if (output) {
+						console.info(' - Logged in to remote server: ' + server.url);
+					}
 					loginReported = true;
 				}
 				server.login = true;
@@ -2296,57 +2332,12 @@ var _loginToDevServer = function (server) {
 				});
 			}
 		});
-		/*
-		request.post(server.url + '/cs/login/j_security_check', {
-			form: {
-				j_character_encoding: 'UTF-8',
-				j_username: server.username,
-				j_password: server.password
-			}
-		}, function (err, resp, body) {
-			if (err) {
-				console.log(' - Failed to login to ' + server.url);
-				return resolve({
-					'status': false
-				});
-			}
-			// we expect a 303 response
-			if (resp && resp.statusCode === 303) {
-				var location = server.url + '/adfAuthentication?login=true';
-
-				request.get(location, function (err, response, body) {
-					if (err) {
-						console.log(' - failed to login to ' + server.url);
-						return resolve({
-							'status': false
-						});
-					}
-
-					if (!loginReported) {
-						console.log(' - Logged in to remote server: ' + server.url);
-						loginReported = true;
-					}
-					server.login = true;
-					return resolve({
-						'status': true
-					});
-				});
-			} else {
-				return resolve({
-					'status': false
-				});
-			}
-		});
-		*/
 	});
 	return loginPromise;
 };
 module.exports.loginToDevServer = _loginToDevServer;
 
 var _loginToPODServer = function (server) {
-	if (server.sso) {
-		return _loginToSSOServer(server);
-	}
 
 	if (server.useSecurityTokenAPI) {
 		return new Promise(function (resolve, reject) {
@@ -2839,9 +2830,9 @@ var _getServerVersion = function (server) {
 
 module.exports.loginToICServer = _loginToICServer;
 
-module.exports.loginToServer = function (server) {
+module.exports.loginToServer = function (server, noMsg) {
 	return new Promise(function (resolve, reject) {
-		_loginToServer(server).then(function (result) {
+		_loginToServer(server, noMsg).then(function (result) {
 			if (result.status) {
 				return resolve(result);
 				/* Do not check version for now
@@ -2874,13 +2865,13 @@ module.exports.loginToServer = function (server) {
 			} else {
 				return resolve({
 					status: result.status,
-					statusMessage: 'ERROR: failed to connect to the server'
+					statusMessage: result.statusMessage || 'ERROR: failed to connect to the server'
 				});
 			}
 		});
 	});
 };
-var _loginToServer = function (server) {
+var _loginToServer = function (server, showMsg) {
 	if (server.login) {
 		return Promise.resolve({
 			status: true
@@ -2889,28 +2880,40 @@ var _loginToServer = function (server) {
 
 	var env = server.env || 'pod_ec';
 
+	var browserEnv = process.env.CEC_LCM_DOCKER;
+	var noBrowser = browserEnv && browserEnv.toLowerCase() === 'true';
+	var noBrowserMsg = 'No OAuth token is available';
+
 	if (env === 'dev_pod') {
 		process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 	}
 
 	if (env === 'pod_ec' && server.idcs_url && server.client_id && server.client_secret && server.scope) {
 
-		return _getOAuthTokenFromIDCS(server);
+		return _getOAuthTokenFromIDCS(server, showMsg);
 
 	} else if (server.oauthtoken) {
 		// console.log(server);
 		// verify the token
-		return _getConnection(server)
+		// return _getConnection(server)
+		return _getUser(server)
 			.then(function (result) {
-				var userId = result && result.user && result.user.id;
+				var userId = result && result.userId;
 				if (!userId) {
 					server.login = false;
 					server.oauthtoken = '';
 					// remove the expired/invalid token
 					_clearOAuthToken(server);
 
-					// open browser to obtain the token again
-					return _loginToServer(server);
+					if (noBrowser) {
+						return Promise.resolve({
+							status: false,
+							statusMessage: noBrowserMsg
+						});
+					} else {
+						// open browser to obtain the token again
+						return _loginToServer(server);
+					}
 				} else {
 					return Promise.resolve({
 						status: userId ? true : false
@@ -2920,23 +2923,23 @@ var _loginToServer = function (server) {
 
 	} else if (env === 'dev_osso') {
 
-		return _loginToSSOServer(server);
+		return noBrowser ? Promise.resolve({status: false, statusMessage: noBrowserMsg}) : _loginToPODServer(server);
 
 	} else if (env === 'dev_ec') {
 
-		return _loginToDevServer(server);
+		return _loginToDevServer(server, showMsg);
 
 	} else if (env === 'dev_pod') {
 
-		return _loginToPODServer(server);
+		return noBrowser ? Promise.resolve({status: false, statusMessage: noBrowserMsg}) : _loginToPODServer(server);
 
 	} else if (env === 'pod_ic') {
 
-		return _loginToICServer(server);
+		return noBrowser ? Promise.resolve({status: false, statusMessage: noBrowserMsg}) : _loginToICServer(server);
 
 	} else {
 		// default
-		return _loginToPODServer(server);
+		return noBrowser ? Promise.resolve({status: false, statusMessage: noBrowserMsg}) : _loginToPODServer(server);
 	}
 };
 
@@ -2973,6 +2976,48 @@ var _getConnection = function (server) {
 				console.error('ERROR: failed to connect : ' + msg);
 				return resolve({
 					err: 'err'
+				});
+			}
+		});
+	});
+};
+
+var _getUser = function (server) {
+	return new Promise(function (resolve, reject) {
+		var url = server.url + '/documents/integration?IdcService=GET_USER_INFO&IsJson=1';
+		var options = {
+			method: 'GET',
+			url: url,
+			headers: {
+				Authorization: _getRequestAuthorization(server)
+			}
+		};
+
+		var request = require('./requestUtils.js').request;
+		request.get(options, function (error, response, body) {
+			if (error) {
+				console.error('ERROR: failed to validate user');
+				console.error(error);
+				return resolve({
+					err: 'err'
+				});
+			}
+			var data;
+			try {
+				data = JSON.parse(body);
+			} catch (e) {
+				// invalid
+			}
+
+			if (!data || !data.LocalData || data.LocalData.StatusCode !== '0' || !data.LocalData.dUser || data.LocalData.dUser === 'anonymous') {
+				var msg = data && data.LocalData && data.LocalData.StatusMessage ? data.LocalData.StatusMessage : (response.statusCode + ' ' +  response.statusMessage);
+				console.error('ERROR: failed to validate user : ' + msg);
+				return resolve({
+					err: 'err'
+				});
+			} else {
+				return resolve({
+					userId: data.LocalData.dUser
 				});
 			}
 		});
@@ -3124,7 +3169,8 @@ module.exports.getBackgroundServiceJobs = function (server, type) {
 			}
 
 			if (!data || !data.LocalData || data.LocalData.StatusCode !== '0') {
-				console.error('ERROR: Failed to get background jobs' + (data && data.LocalData ? ' - ' + data.LocalData.StatusMessage : ''));
+				var msg = data && data.LocalData && data.LocalData.StatusMessage ? data.LocalData.StatusMessage : (response.statusMessage + ' ' + response.statusCode);
+				console.error('ERROR: Failed to get background jobs ' + msg);
 				return resolve({
 					err: 'err'
 				});

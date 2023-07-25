@@ -45,11 +45,21 @@ var templateBuildContentDirBase = '',
 	templateBuildContentDirName = '',
 	templateName = '';
 
+// default the mount points
+var baseMountPoint = '/_ocm_publish',
+	themeMountPoint = path.join(baseMountPoint, 'themes'),
+	siteMountPoint = path.join(baseMountPoint, 'sites'),
+	componentMountPoint = path.join(baseMountPoint, 'components');
+
 /**
  * Verify the source structure before proceed the command
- * @param {*} done 
+ * @param {*} done
  */
 var verifyRun = function (argv) {
+
+	if (process.shim) {
+		return true;
+	}
 	projectDir = argv.projectDir;
 
 	var srcfolder = serverUtils.getSourceFolder(projectDir);
@@ -247,7 +257,7 @@ var _createLocalTemplateFromSite = function (name, siteName, server, excludeCont
 
 					var showError = true;
 					var showDetail = false;
-					return _downloadResource(server, 'site', site.id, siteName, publishedversion, tempSrcPath, showError, showDetail, excludeFolder);
+					return _downloadSite(server, 'site', site.id, siteName, publishedversion, tempSrcPath, showError, showDetail, excludeFolder);
 
 				})
 				.then(function (result) {
@@ -340,7 +350,6 @@ var _createLocalTemplateFromSite = function (name, siteName, server, excludeCont
 
 				})
 				.then(function (result) {
-
 					hasAssets = result && result.hasAssets;
 					if (isEnterprise && !hasAssets) {
 						console.info(' - site does not have any asset');
@@ -350,7 +359,6 @@ var _createLocalTemplateFromSite = function (name, siteName, server, excludeCont
 
 				})
 				.then(function (result) {
-
 					otherAssets = result && result.data || [];
 					if (otherAssets.length > 0) {
 						console.log(' - site has assets from other repositories and they will not be included in the template');
@@ -387,48 +395,50 @@ var _createLocalTemplateFromSite = function (name, siteName, server, excludeCont
 					if (!contentDownloaded && !excludeType && types.length > 0) {
 						var categoryLayoutMappings = [];
 						types.forEach(function (type) {
-							var mapping = type.layoutMapping;
-							if (mapping.data && mapping.data.length > 0) {
-								var typeMappings = mapping.data;
-								// console.log(type.name);
-								// console.log(JSON.stringify(typeMappings, null, 4));
-								var categoryList = [];
-								for (var j = 0; j < typeMappings.length; j++) {
-									if (typeMappings[j].label) {
-										var desktopLayout = typeMappings[j].formats && typeMappings[j].formats.desktop;
-										var mobileLayout = typeMappings[j].formats && typeMappings[j].formats.mobile;
-										if (desktopLayout) {
-											categoryList.push({
-												categoryName: typeMappings[j].label,
-												layoutName: desktopLayout
-											});
-											if (!contentLayoutNames.includes(desktopLayout)) {
-												contentLayoutNames.push(desktopLayout);
+							if (type && type.id && type.name) {
+								var mapping = type.layoutMapping;
+								if (mapping && mapping.data && mapping.data.length > 0) {
+									var typeMappings = mapping.data;
+									// console.log(type.name);
+									// console.log(JSON.stringify(typeMappings, null, 4));
+									var categoryList = [];
+									for (var j = 0; j < typeMappings.length; j++) {
+										if (typeMappings[j].label) {
+											var desktopLayout = typeMappings[j].formats && typeMappings[j].formats.desktop;
+											var mobileLayout = typeMappings[j].formats && typeMappings[j].formats.mobile;
+											if (desktopLayout) {
+												categoryList.push({
+													categoryName: typeMappings[j].label,
+													layoutName: desktopLayout
+												});
+												if (!contentLayoutNames.includes(desktopLayout)) {
+													contentLayoutNames.push(desktopLayout);
+												}
 											}
-										}
-										if (mobileLayout) {
-											categoryList.push({
-												categoryName: typeMappings[j].label + '|mobile',
-												layoutName: mobileLayout
-											});
-											if (!contentLayoutNames.includes(mobileLayout)) {
-												contentLayoutNames.push(mobileLayout);
+											if (mobileLayout) {
+												categoryList.push({
+													categoryName: typeMappings[j].label + '|mobile',
+													layoutName: mobileLayout
+												});
+												if (!contentLayoutNames.includes(mobileLayout)) {
+													contentLayoutNames.push(mobileLayout);
+												}
 											}
-										}
-										if (!desktopLayout && !mobileLayout) {
+											if (!desktopLayout && !mobileLayout) {
 											// default settings
-											categoryList.push({
-												categoryName: typeMappings[j].label,
-												layoutName: ''
-											});
+												categoryList.push({
+													categoryName: typeMappings[j].label,
+													layoutName: ''
+												});
+											}
 										}
-									}
 
+									}
+									categoryLayoutMappings.push({
+										type: type.name,
+										categoryList: categoryList
+									});
 								}
-								categoryLayoutMappings.push({
-									type: type.name,
-									categoryList: categoryList
-								});
 							}
 						});
 						// console.log(' - content layouts: ' + contentLayoutNames);
@@ -554,7 +564,7 @@ var _createLocalTemplateFromSite = function (name, siteName, server, excludeCont
 };
 
 /**
- * If a template is created from a published site, theme and components, 
+ * If a template is created from a published site, theme and components,
  * some files that originally from settings should be removed from the top folder
  */
 var _cleanupPublishedTemplate = function (name, tempPath) {
@@ -593,7 +603,88 @@ var _cleanupPublishedTemplate = function (name, tempPath) {
 	});
 };
 
+
+/// copy the theme from the mounted shared filesystem location if available
+var _copyThemeFromFSS = function (themeName, themeSrcPath, excludeFolders, publishedversion) {
+	var mountedThemePath = path.join(themeMountPoint, themeName);
+	if (publishedversion && fs.existsSync(mountedThemePath)) {
+		// copy the theme files
+		try {
+			console.info(' - copying theme files: ' + themeName)
+			fs.cpSync(mountedThemePath, themeSrcPath, { force: true, recursive: true });
+			return true;
+		} catch (err) {
+			console.error(err)
+			return false;
+		}
+	} else {
+		// only link if using the published version of the site
+		return false;
+	}
+};
+
 var _downloadTheme = function (server, themeName, themeId, themeSrcPath, excludeFolders, publishedversion) {
+	// try to copy the theme using the expected OCM mount point
+	if (_copyThemeFromFSS(themeName, themeSrcPath, excludeFolders, publishedversion)) {
+		return serverUtils.getThemeMetadata(server, themeId, themeName).then(function (result) {
+			// get the theme identity in folder info
+			var itemGUID = result && result.metadata && result.metadata.scsItemGUID || themeId;
+			// console.log(' - theme ' + themeName + ' itemGUID: ' + itemGUID + ' id: ' + themeId);
+			// create _folder.json for theme
+			var folderJson = {
+				themeName: themeName,
+				itemGUID: itemGUID
+			};
+			fs.writeFileSync(path.join(themeSrcPath, '_folder.json'), JSON.stringify(folderJson));
+
+			return Promise.resolve(folderJson);
+		});
+	} else {
+		// otherwise download the individual files
+		return _downloadThemeFiles(server, themeName, themeId, themeSrcPath, excludeFolders, publishedversion);
+	}
+};
+
+
+// copy any components from the mounted shared filesystem location if available
+var _copySiteComponentsFromFSS = function (compNames, publishedversion) {
+	if (publishedversion && fs.existsSync(componentMountPoint)) {
+		var missingComps = [];
+
+		// try to link published version of components
+		compNames.forEach((compName) => {
+			// try to copy the component
+			var copied = false;
+
+			// copy across the component
+			var compTargePath = path.join(componentsSrcDir, compName);
+			var mountedComponentPath = path.join(componentMountPoint, compName);
+
+			if (fs.existsSync(mountedComponentPath)) {
+				try {
+					console.info(' - copying component: ' + compName);
+					fs.cpSync(mountedComponentPath, compTargePath, { force: true, recursive: true });
+					copied = true;
+				} catch (err) {
+					console.error(err)
+				}
+			}
+
+			// if couldn't link the component, download it
+			if (!copied) {
+				missingComps.push(compName);
+			}
+		});
+
+		// return list of components still to download
+		return missingComps;
+	} else {
+		// return list of components still to download
+		return compNames;
+	}
+};
+
+var _downloadThemeFiles = function (server, themeName, themeId, themeSrcPath, excludeFolders, publishedversion) {
 	return new Promise(function (resolve, reject) {
 		// download theme
 		var downloadArgv = {
@@ -640,6 +731,18 @@ var _downloadTheme = function (server, themeName, themeId, themeSrcPath, exclude
 };
 
 var _downloadSiteComponents = function (server, compNames, publishedversion) {
+	var total = compNames.length;
+	console.info(' - total number of components: ' + total);
+
+	// try to copy components first
+	var componentsToDownload = _copySiteComponentsFromFSS(compNames, publishedversion);
+
+	// now download any components that weren't linked
+	return _downloadSiteComponentsFiles(server, componentsToDownload, publishedversion);
+};
+
+var _downloadSiteComponentsFiles = function (server, compNames, publishedversion) {
+
 	return new Promise(function (resolve, reject) {
 		var comps = [];
 		var downloadedComps = [];
@@ -672,7 +775,7 @@ var _downloadSiteComponents = function (server, compNames, publishedversion) {
 				// create _folder.json for all components
 				for (var i = 0; i < comps.length; i++) {
 					var itemGUID = comps[i].id;
-					// get the component's identity 
+					// get the component's identity
 					for (var j = 0; j < compFolderInfo.length; j++) {
 						var compInfo = compFolderInfo[j];
 						if (compInfo && compInfo.folderId === comps[i].id && compInfo.metadata.scsItemGUID) {
@@ -948,8 +1051,6 @@ var _queryComponents = function (server, compNames) {
 
 var _downloadComponents = function (comps, server, publishedversion) {
 	return new Promise(function (resolve, reject) {
-		var total = comps.length;
-		console.info(' - total number of components: ' + total);
 		var compData = [];
 
 		var doDownloadComp = comps.reduce(function (compPromise, param) {
@@ -987,8 +1088,8 @@ var _downloadComponents = function (comps, server, publishedversion) {
 					});
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise 
-			Promise.resolve({}));
+		// Start with a previousPromise value that is a resolved promise
+		Promise.resolve({}));
 
 		doDownloadComp.then(function (result) {
 			// console.log(' - total number of downloaded files: ' + fileData.length);
@@ -996,6 +1097,37 @@ var _downloadComponents = function (comps, server, publishedversion) {
 		});
 
 	});
+};
+
+// copy the site from the mounted shared filesystem location if available
+var _copySiteFromFSS = function (siteName, siteSrcPath, publishedversion) {
+	var mountedSitePath = path.join(siteMountPoint, siteName);
+	if (publishedversion && fs.existsSync(mountedSitePath)) {
+		// copy the site files
+		try {
+			console.info(' - copying site files: ' + siteName);
+			fs.cpSync(mountedSitePath, siteSrcPath, { force: true, recursive: true });
+			return true;
+		} catch (err) {
+			console.error(err)
+			return false;
+		}
+	} else {
+		// only copy if using the published version of the site
+		return false;
+	}
+};
+
+// Download the site - use the source folder if it exists, otherwise handle individual files
+var _downloadSite = function (server, type, id, name, publishedversion, targetPath, showError, showDetail, excludeFolder) {
+
+	// try to copy the site
+	if (_copySiteFromFSS(name, targetPath, publishedversion)) {
+		return Promise.resolve({});
+	} else {
+		// if can't copy, then download the site
+		return _downloadResource(server, type, id, name, publishedversion, targetPath, showError, showDetail, excludeFolder);
+	}
 };
 
 //
@@ -1131,6 +1263,15 @@ var _downloadResource = function (server, type, id, name, publishedversion, targ
 	});
 };
 
+// set file mount points for copying files during creating a template
+var _setMountPoints = function (mountPoint) {
+	// ToDo: get final FSS mount point as default
+	baseMountPoint = mountPoint || '/_ocm_publish';
+	themeMountPoint = path.join(baseMountPoint, 'themes');
+	siteMountPoint = path.join(baseMountPoint, 'sites');
+	componentMountPoint = path.join(baseMountPoint, 'components');
+};
+
 module.exports.createTemplate = function (argv, done) {
 	'use strict';
 
@@ -1140,7 +1281,7 @@ module.exports.createTemplate = function (argv, done) {
 	}
 
 	var tempName = argv.name;
-	// verify the new template name 
+	// verify the new template name
 	var re = /^[a-z0-9_-]+$/ig;
 	if (tempName.search(re) === -1) {
 		console.error('ERROR: Use only letters, numbers, hyphens, and underscores in component names.');
@@ -1169,8 +1310,11 @@ module.exports.createTemplate = function (argv, done) {
 		var excludeComponents = typeof argv.excludecomponents === 'string' && argv.excludecomponents.toLowerCase() === 'true';
 		var enterprisetemplate = typeof argv.enterprisetemplate === 'string' && argv.enterprisetemplate.toLowerCase() === 'true';
 		var excludeTheme = false;
-		var excludeType = false;
+		var excludeType = typeof argv.excludetype === 'string' && argv.excludetype.toLowerCase() === 'true';
 		var excludeFolders = argv.excludefolders ? argv.excludefolders.split(',') : [];
+
+		// allow the user to override the location of the source files
+		_setMountPoints(typeof argv.sourcefiles === 'string' && argv.sourcefiles);
 
 		_createLocalTemplateFromSite(argv.name, siteName, server, excludeContent, enterprisetemplate,
 			excludeComponents, excludeTheme, excludeType, publishedassets, referencedassets, excludeFolders, publishedversion)
@@ -1207,7 +1351,7 @@ module.exports.createTemplate = function (argv, done) {
 		console.info('Create Template: creating new template ' + tempName + ' from ' + srcTempName);
 		var unzipPromise = unzipTemplate(tempName, path.resolve(templatesDataDir + '/' + template), true);
 		unzipPromise.then(function (result) {
-			// update _folder.json 
+			// update _folder.json
 			var filePath = path.join(templatesSrcDir, tempName, '_folder.json');
 			if (fs.existsSync(filePath)) {
 				var infoJson = JSON.parse(fs.readFileSync(filePath));
@@ -1427,7 +1571,7 @@ module.exports.copyTemplate = function (argv, done) {
 
 		var themeName = tempName + 'Theme';
 
-		// verify the new template name 
+		// verify the new template name
 		var re = /^[a-z0-9_-]+$/ig;
 		if (tempName.search(re) === -1) {
 			console.error('ERROR: Use only letters, numbers, hyphens, and underscores in component names.');
@@ -1439,7 +1583,7 @@ module.exports.copyTemplate = function (argv, done) {
 				done();
 				return;
 			}
-			// check theme name 
+			// check theme name
 			if (fs.existsSync(path.join(themesSrcDir, themeName))) {
 				console.error('ERROR: A theme with the name ' + themeName + ' already exists. Please specify a different template name.');
 				done();
@@ -1804,7 +1948,7 @@ var _publishComponents = function (server, comps) {
 					});
 			});
 		},
-			Promise.resolve({})
+		Promise.resolve({})
 		);
 
 		doPublishComps.then(function (result) {
@@ -1911,6 +2055,17 @@ module.exports.describeTemplate = function (argv, done) {
 		return;
 	}
 
+	/*
+	Browser toolkit FIX for some reason argv.template has no data but our template name goes to argv.name within browser env
+	Also we must explicitly define server as __cecconfigserver otherwise it will look for templates locally
+	*/
+
+
+	if (process.shim) {
+		argv.template = argv.name;
+		argv.server = "__cecconfigserver";
+	}
+
 	if (typeof argv.template !== 'string') {
 		console.error('ERROR: please specify template');
 		done();
@@ -1962,7 +2117,7 @@ module.exports.describeTemplate = function (argv, done) {
 
 	} else {
 
-		// 
+		//
 		// local template
 		//
 
@@ -2453,7 +2608,7 @@ module.exports.removeThemeComponent = function (argv, done) {
 	done(true);
 };
 
-/** 
+/**
  * private
  * unzip template zip file and copy to /src
  */
@@ -2475,7 +2630,7 @@ var unzipTemplate = function (tempName, tempPath, useNewGUID) {
 					console.error(err);
 				}
 
-				// get the theme name from theme/_folder.json 
+				// get the theme name from theme/_folder.json
 				var themeName = '';
 				if (createNew) {
 					themeName = tempName + 'Theme';
@@ -2520,7 +2675,7 @@ var unzipTemplate = function (tempName, tempPath, useNewGUID) {
 					console.error('ERROR: ' + err);
 				}
 
-				// move all files under /template up 
+				// move all files under /template up
 				var files = fs.readdirSync(path.join(tempSrcDir, 'template'));
 				for (var i = 0; i < files.length; i++) {
 					fs.renameSync(path.join(tempSrcDir, 'template', files[i]), path.join(tempSrcDir, files[i]));
@@ -2653,7 +2808,7 @@ var _exportTemplate = function (name, optimize, excludeContentTemplate, extraCom
 		fileUtils.copy(tempSrcDir, path.join(tempBuildDir, 'template'));
 		console.info(' - template ' + name);
 
-		// remove static folder 
+		// remove static folder
 		var staticBuidDir = path.join(tempBuildDir, 'template', 'static');
 		if (fs.existsSync(staticBuidDir)) {
 			console.log(' - exclude site static files');
@@ -2752,8 +2907,8 @@ var _exportTemplate = function (name, optimize, excludeContentTemplate, extraCom
 					files.forEach(function (name) {
 						if (name.endsWith('.js')) {
 							var orig = fs.readFileSync(name, {
-								encoding: 'utf8'
-							}),
+									encoding: 'utf8'
+								}),
 								result = uglifyjs.minify(orig),
 								uglified = result.code;
 							if (result.error) {
@@ -3333,11 +3488,11 @@ module.exports.compileContent = function (argv, done) {
 
 /**
  * Delete a template on server with REST APIs
- * 
- * @param {Delete} server 
- * @param {*} name 
- * @param {*} permanent 
- * @param {*} done 
+ *
+ * @param {Delete} server
+ * @param {*} name
+ * @param {*} permanent
+ * @param {*} done
  */
 var _deleteTemplateREST = function (server, name, permanent, done) {
 
@@ -3389,11 +3544,11 @@ var _deleteTemplateREST = function (server, name, permanent, done) {
 
 /**
  * Create template from a site with REST APIs
- * @param {*} server 
- * @param {*} name 
- * @param {*} siteName 
- * @param {*} includeUnpublishedAssets 
- * @param {*} done 
+ * @param {*} server
+ * @param {*} name
+ * @param {*} siteName
+ * @param {*} includeUnpublishedAssets
+ * @param {*} done
  */
 var _createTemplateFromSiteREST = function (server, name, siteName, includeUnpublishedAssets, enterprisetemplate) {
 	return new Promise(function (resolve, reject) {
@@ -3406,7 +3561,7 @@ var _createTemplateFromSiteREST = function (server, name, siteName, includeUnpub
 
 			var site;
 
-			// verify template 
+			// verify template
 			sitesRest.resourceExist({
 				server: server,
 				type: 'templates',
@@ -3495,9 +3650,9 @@ var _createTemplateFromSiteREST = function (server, name, siteName, includeUnpub
 
 /**
  * Download a template from server
- * @param {*} server 
- * @param {*} name 
- * @param {*} done 
+ * @param {*} server
+ * @param {*} name
+ * @param {*} done
  */
 var _downloadTemplateREST = function (server, name) {
 	return new Promise(function (resolve, reject) {
@@ -3648,10 +3803,10 @@ var _importTemplateToServerRest = function (server, name, folder, zipfile) {
 
 /**
  * Create and download template with Idc Service APIs (IC)
- * @param {*} server 
- * @param {*} name 
- * @param {*} siteName 
- * @param {*} done 
+ * @param {*} server
+ * @param {*} name
+ * @param {*} siteName
+ * @param {*} done
  */
 var _createTemplateFromSiteAndDownloadSCS = function (argv) {
 	verifyRun(argv);

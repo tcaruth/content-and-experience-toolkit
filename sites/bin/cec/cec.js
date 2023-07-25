@@ -23,6 +23,11 @@ const _isWindows = /^win/.test(process.platform) ? true : false;
 if (_isWindows && cwd.endsWith(':\\')) {
 	cwd = cwd.substring(0, cwd.length - 1);
 }
+// overriding console underbrowser
+if (process.shim) {
+	// eslint-disable-next-line no-global-assign
+	console = require('../../test/server/loggerforWeb').console;
+}
 
 // console.log("Current working directory is: " + cwd);
 
@@ -101,7 +106,7 @@ const appRoot = path.join(cecRootReal, '../..');
 // console.log('cec Root: ' + appRoot);
 
 /**************************
- * Private helper functions 
+ * Private helper functions
  ***************************/
 
 var getComponentSources = function () {
@@ -278,6 +283,16 @@ var getResourceTypes = function () {
 
 var getTaxonomyStatus = function () {
 	var names = ['promoted', 'published'];
+	return names;
+};
+
+var getTaxonomyCategoryStatus = function () {
+	var names = ['promoted', 'draft'];
+	return names;
+};
+
+var getCategoryPropertyNames = function () {
+	var names = ['keywords', 'synonyms', 'relatedCategories', 'customProperties'];
 	return names;
 };
 
@@ -623,6 +638,7 @@ const createTemplate = {
 		['cec create-template Temp1 -s Site1 -p', 'Create template Temp1 based on site Site1 on OCM server and include only the published assets'],
 		['cec create-template Temp1 -s Site1 -n', 'Create template Temp1 based on site Site1 on OCM server and include only the assets added to the site\'s pages'],
 		['cec create-template Temp1 -s Site1 -x', 'Create template Temp1 based on site Site1 on OCM server and exclude the content in the site'],
+		['cec create-template Temp1 -s Site1 -x -t', 'Create template Temp1 based on site Site1 on OCM server and exclude both content and content types in the site'],
 		['cec create-template Temp1 -s Site1 -c', 'Create template Temp1 based on site Site1 on OCM server and exclude the components used in the site'],
 		['cec create-template Temp1 -s Site1 -d site:content', 'Create template Temp1 based on site Site1 on OCM server and exclude the content folder of the site'],
 		['cec create-template Temp1 -s Site1 -r SampleServer1', 'Create template Temp1 based on site Site1 on the registered server SampleServer1'],
@@ -1346,6 +1362,25 @@ const uploadTaxonomy = {
 	]
 };
 
+const transferCategoryProperty = {
+	command: 'transfer-category-property <name>',
+	alias: 'tcp',
+	name: 'transfer-category-property',
+	usage: {
+		'short': 'Transfers category properties from one OCM server to another.',
+		'long': (function () {
+			let desc = 'Transfers category properties of a taxonomy from one OCM server to another. Optionally specify the taxonomy id with -i <id> if another taxonomy has the same name. ';
+			desc += os.EOL + 'The taxonomy on the two servers should be in sync before use this command. And only the following properties will be updated on the destination server' + os.EOL + os.EOL;
+			desc = getCategoryPropertyNames().reduce((acc, item) => acc + '  ' + item + '\n', desc);
+			return desc;
+		})()
+	},
+	example: [
+		['cec transfer-category-property Taxonomy1 -s SampleServer -d SampleServer1', 'The promoted taxonomy categories will be transferred'],
+		['cec transfer-category-property Taxonomy1 -i 6A6DC736572C468B90F2A1C17B7CE5E4 -s SampleServer -d SampleServer']
+	]
+};
+
 const updateTaxonomy = {
 	command: 'update-taxonomy <name>',
 	alias: 'utx',
@@ -1392,7 +1427,7 @@ const describeTaxonomy = {
 	usage: {
 		'short': 'Lists the properties of a taxonomy on OCM server.',
 		'long': (function () {
-			let desc = 'Lists the properties of a taxonomy on OCM server. Optionally specify the taxonomy id with -i <id> if another taxonomy has the same name. Optionally specify -f <file> to save the properties to a JSON file. Specify the server with -s <server> or use the one specified in cec.properties file. ';
+			let desc = 'Lists the properties of a taxonomy on OCM server. Specify the taxonomy with -t <taxonomy>. Optionally specify the taxonomy id with -i <id> if another taxonomy has the same name. Optionally specify -f <file> to save the properties to a JSON file. Specify the server with -s <server> or use the one specified in cec.properties file. ';
 			return desc;
 		})()
 	},
@@ -1400,6 +1435,24 @@ const describeTaxonomy = {
 		['cec describe-taxonomy Taxonomy1 -s SampleServer1'],
 		['cec describe-taxonomy Taxonomy1 -i 6A6DC736572C468B90F2A1C17B7CE5E4 -s SampleServer1'],
 		['cec describe-taxonomy Taxonomy1 -f ~/Docs/Taxonomy1.json -s SampleServer1']
+	]
+};
+
+const describeCategory = {
+	command: 'describe-category <apiname>',
+	alias: 'dsct',
+	name: 'describe-category',
+	usage: {
+		'short': 'Lists the properties of a taxonomy\'s category on OCM server.',
+		'long': (function () {
+			let desc = 'Lists the properties of a taxonomy\'s category on OCM server.  Optionally specify -f <file> to save the properties to a JSON file. Specify the server with -s <server> or use the one specified in cec.properties file. ';
+			return desc;
+		})()
+	},
+	example: [
+		['cec describe-category ta1-c -t Taxonomy1 -s SampleServer1'],
+		['cec describe-category ta1-c -t Taxonomy1 -i 6A6DC736572C468B90F2A1C17B7CE5E4 -s SampleServer1'],
+		['cec describe-category ta1-c -t Taxonomy1 -f ~/Docs/Taxonomy1.json -s SampleServer1']
 	]
 };
 
@@ -1710,6 +1763,9 @@ const controlSite = {
 		['cec control-site publish -s Site1 -f ', 'Do a full publish of Site1'],
 		['cec control-site publish -s Site1 -i seo ', 'Only publish Sitemap and Robots files of site Site1'],
 		['cec control-site publish -s Site1 -i seo,rssFeeds ', 'Only publish Sitemap, Robots and RSS Feed files of site Site1'],
+		['cec control-site publish -s Site1 -a 100,200 ', 'Only publish page 100 and 200 of site Site1'],
+		['cec control-site publish -s Site1 -a 100 -b ', 'Only publish page 100 and its sub pages of site Site1'],
+		['cec control-site publish -s Site1 -l 150:GUID1,GUID2 ', 'Only publish assets GUID1 and GUID2 on detail page 150 of site Site1'],
 		['cec control-site publish -s Site1 -r SampleServer1', 'Publish site Site1 on the registered server SampleServer1'],
 		['cec control-site unpublish -s Site1 -r SampleServer1', 'Unpublish site Site1 on the registered server SampleServer1'],
 		['cec control-site bring-online -s Site1 -r SampleServer1', 'Bring site Site1 online on the registered server SampleServer1'],
@@ -1785,7 +1841,8 @@ const transferSitePage = {
 	},
 	example: [
 		['cec transfer-site-page Site1 -s SampleServer -d SampleServer1 -p 100', 'Create or update page 100 on server SampleServer1 based on server SampleServer'],
-		['cec transfer-site-page Site1 -s SampleServer -d SampleServer1 -p 100,200', 'Create or update page 100 and 200 on server SampleServer1 based on server SampleServer']
+		['cec transfer-site-page Site1 -s SampleServer -d SampleServer1 -p 100,200', 'Create or update page 100 and 200 on server SampleServer1 based on server SampleServer'],
+		['cec transfer-site-page Site1 -s SampleServer -d SampleServer1 -p 100 -t Site2', 'Create or update page 100 for site Site2 on server SampleServer1 based on site Site1 on server SampleServer']
 	]
 };
 
@@ -1916,8 +1973,8 @@ const setSiteSecurity = {
 		['cec set-site-security Site1 -s no -r SampleServer1', 'make the site publicly available to anyone on server SampleServer1'],
 		['cec set-site-security Site1 -s yes', 'Require everyone to sign in to access this site and any authenticated user can access'],
 		['cec set-site-security Site1 -s yes -a "Visitors,Service users"', 'Require everyone to sign in to access this site and all service visitors and users can access'],
-		['cec set-site-security Site1 -s yes -a "Specific users" -u user1,user2', 'Require everyone to sign in to access this site and only user1 and user2 can access'],
-		['cec set-site-security Site1 -s yes -d user1', 'Remove user1\'s access from the site']
+		['cec set-site-security Site1 -s yes -a "Specific users" -u user1,user2, -g group1,group2', 'Require everyone to sign in to access this site and only user1, user2, group1 and group2 can access'],
+		['cec set-site-security Site1 -s yes -d user1 -o group1', 'Remove the access of user1 and group1 from the site']
 	]
 };
 
@@ -2848,7 +2905,7 @@ const describeType = {
 		*/
 	]
 };
-/** 
+/**
  * 2021-08-20 removed
 const createWordTemplate = {
 	command: 'create-word-template <type>',
@@ -3252,7 +3309,8 @@ const createTranslationJob = {
 		['cec create-translation-job job1 -s Site1 -l de-DE,it-IT -c Lingotek'],
 		['cec create-translation-job job1 -p Repo1 -o collection1 -l all -r SampleServer1'],
 		['cec create-translation-job job1 -p Repo1 -a GUID1,GUID2 -l all -r SampleServer1'],
-		['cec create-translation-job job1 -p Repo1 -q \'type eq "BlogType"\' -l all -c Lingotek -r SampleServer1']
+		['cec create-translation-job job1 -p Repo1 -q \'type eq "BlogType"\' -l all -c Lingotek -r SampleServer1'],
+		['cec create-translation-job job1 -p Repo1 -q \'language eq "en"\' -n en -l de-DE -c Lingotek -r SampleServer1']
 	]
 };
 
@@ -4482,10 +4540,12 @@ _usage = _usage + os.EOL + 'Recommendations' + os.EOL +
 
 _usage = _usage + os.EOL + 'Taxonomies' + os.EOL +
 	_getCmdHelp(downloadTaxonomy) + os.EOL +
+	_getCmdHelp(transferCategoryProperty) + os.EOL +
 	_getCmdHelp(uploadTaxonomy) + os.EOL +
 	_getCmdHelp(controlTaxonomy) + os.EOL +
 	_getCmdHelp(updateTaxonomy) + os.EOL +
 	_getCmdHelp(describeTaxonomy) + os.EOL +
+	_getCmdHelp(describeCategory) + os.EOL +
 	_getCmdHelp(shareTaxonomy) + os.EOL +
 	_getCmdHelp(unshareTaxonomy) + os.EOL;
 
@@ -4828,6 +4888,10 @@ const argv = yargs.usage(_usage)
 					alias: 'x',
 					description: 'Exclude content'
 				})
+				.option('excludetype', {
+					alias: 't',
+					description: 'Exclude content types'
+				})
 				.option('excludecomponents', {
 					alias: 'c',
 					description: 'Exclude components'
@@ -4843,6 +4907,11 @@ const argv = yargs.usage(_usage)
 				.option('server', {
 					alias: 'r',
 					description: 'The registered OCM server'
+				})
+				.option('sourcefiles', {
+					alias: 'l',
+					description: 'Attempt to download files from this source file location',
+					hidden: true
 				})
 				.check((argv) => {
 					if (argv.from && !getTemplateSources().includes(argv.from)) {
@@ -4864,6 +4933,7 @@ const argv = yargs.usage(_usage)
 				.example(...createTemplate.example[8])
 				.example(...createTemplate.example[9])
 				.example(...createTemplate.example[10])
+				.example(...createTemplate.example[11])
 				.help(false)
 				.version(false)
 				.usage(`Usage: cec ${createTemplate.command}\n\n${createTemplate.usage.long}`);
@@ -5252,7 +5322,7 @@ const argv = yargs.usage(_usage)
 				.version(false)
 				.usage(`Usage: cec ${createTemplateReport.command}\n\n${createTemplateReport.usage.long}`);
 		})
-	.command([cleanupTemplate.command, cleanupTemplate.alias], false,
+	.command([cleanupTemplate.command], false,
 		(yargs) => {
 			yargs.example(...cleanupTemplate.example[0])
 				.help(false)
@@ -6014,6 +6084,31 @@ const argv = yargs.usage(_usage)
 				.version(false)
 				.usage(`Usage: cec ${uploadTaxonomy.command}\n\n${uploadTaxonomy.usage.long}`);
 		})
+	.command([transferCategoryProperty.command, transferCategoryProperty.alias], false,
+		(yargs) => {
+			yargs.option('server', {
+				alias: 's',
+				description: 'The registered OCM server the category properties are from',
+				demandOption: true
+			})
+				.option('destination', {
+					alias: 'd',
+					description: 'The registered OCM server to transfer the category properties',
+					demandOption: true
+				})
+				.option('id', {
+					alias: 'i',
+					description: 'Taxonomy Id'
+				})
+				.check((argv) => {
+					return true;
+				})
+				.example(...transferCategoryProperty.example[0])
+				.example(...transferCategoryProperty.example[1])
+				.help(false)
+				.version(false)
+				.usage(`Usage: cec ${transferCategoryProperty.command}\n\n${transferCategoryProperty.usage.long}`);
+		})
 	.command([controlTaxonomy.command, controlTaxonomy.alias], false,
 		(yargs) => {
 			yargs
@@ -6108,6 +6203,32 @@ const argv = yargs.usage(_usage)
 				.help(false)
 				.version(false)
 				.usage(`Usage: cec ${describeTaxonomy.command}\n\n${describeTaxonomy.usage.long}`);
+		})
+	.command([describeCategory.command, describeCategory.alias], false,
+		(yargs) => {
+			yargs.option('taxonomy', {
+				alias: 't',
+				description: 'Taxonomy name',
+				demandOption: true
+			})
+				.option('id', {
+					alias: 'i',
+					description: 'Taxonomy Id'
+				})
+				.option('file', {
+					alias: 'f',
+					description: 'The JSON file to save the properties'
+				})
+				.option('server', {
+					alias: 's',
+					description: 'The registered OCM server'
+				})
+				.example(...describeCategory.example[0])
+				.example(...describeCategory.example[1])
+				.example(...describeCategory.example[2])
+				.help(false)
+				.version(false)
+				.usage(`Usage: cec ${describeCategory.command}\n\n${describeCategory.usage.long}`);
 		})
 	.command([shareTaxonomy.command, shareTaxonomy.alias], false,
 		(yargs) => {
@@ -6720,8 +6841,13 @@ const argv = yargs.usage(_usage)
 					description: 'The comma separated list of page IDs',
 					demandOption: true
 				})
+				.option('targetsite', {
+					alias: 't',
+					description: 'The target site on the destination server'
+				})
 				.example(...transferSitePage.example[0])
 				.example(...transferSitePage.example[1])
+				.example(...transferSitePage.example[2])
 				.help(false)
 				.version(false)
 				.usage(`Usage: cec ${transferSitePage.command}\n\n${transferSitePage.usage.long}`);
@@ -6745,8 +6871,29 @@ const argv = yargs.usage(_usage)
 					if (argv.settingsfiles && typeof argv.settingsfiles === 'boolean') {
 						throw new Error(os.EOL + 'Please specify valid site settings files');
 					}
+					if (argv.pages && typeof argv.pages === 'boolean') {
+						throw new Error(os.EOL + 'Please specify valid site pages');
+					}
+					if (argv.detailpageassets && typeof argv.detailpageassets === 'boolean') {
+						throw new Error(os.EOL + 'Please specify valid detail page and assets');
+					}
+					if (argv.detailpageassets) {
+						let parts = argv.detailpageassets.toString().split(':');
+						if (parts.length !== 2) {
+							throw new Error(os.EOL + 'Please specify valid detail page and assets in format of <pageid>:<GUID1>,<GUID2>');
+						}
+					}
 					if (argv.settingsfiles && argv.action !== 'publish' && argv.action !== 'publish-internal') {
 						throw new Error(os.EOL + '<settingsfiles> is only for action publish');
+					}
+					if (argv.pages && argv.action !== 'publish' && argv.action !== 'publish-internal') {
+						throw new Error(os.EOL + '<pages> is only for action publish');
+					}
+					if (argv.detailpageassets && argv.action !== 'publish' && argv.action !== 'publish-internal') {
+						throw new Error(os.EOL + '<detailpageassets> is only for action publish');
+					}
+					if (argv.staticincremental && !argv.staticonly) {
+						throw new Error(os.EOL + '<staticincremental> is only available if <staticonly> also specified');
 					}
 					if (argv.settingsfiles) {
 						let files = argv.settingsfiles.split(',');
@@ -6776,6 +6923,10 @@ const argv = yargs.usage(_usage)
 					alias: 't',
 					description: 'Only publish site static files'
 				})
+				.option('staticincremental', {
+					alias: 'm',
+					description: 'Add to the already published static files'
+				})
 				.option('compileonly', {
 					alias: 'p',
 					description: 'Only compile and publish the static files without publishing the site'
@@ -6791,6 +6942,18 @@ const argv = yargs.usage(_usage)
 				.option('settingsfiles', {
 					alias: 'i',
 					description: 'The comma separated list of site settings files'
+				})
+				.option('pages', {
+					alias: 'a',
+					description: 'The comma separated list of page IDs'
+				})
+				.option('expand', {
+					alias: 'b',
+					description: 'Include all the sub pages when publish specific pages'
+				})
+				.option('detailpageassets', {
+					alias: 'l',
+					description: 'The detail page ID and their asset IDs'
 				})
 				.option('theme', {
 					alias: 'e',
@@ -6810,7 +6973,7 @@ const argv = yargs.usage(_usage)
 				})
 				.option('server', {
 					alias: 'r',
-					description: '<server> The registered OCM server'
+					description: 'The registered OCM server'
 				})
 				.example(...controlSite.example[0])
 				.example(...controlSite.example[1])
@@ -6827,6 +6990,9 @@ const argv = yargs.usage(_usage)
 				.example(...controlSite.example[12])
 				.example(...controlSite.example[13])
 				.example(...controlSite.example[14])
+				.example(...controlSite.example[15])
+				.example(...controlSite.example[16])
+				.example(...controlSite.example[17])
 				.help(false)
 				.version(false)
 				.usage(`Usage: cec ${controlSite.command}\n\n${controlSite.usage.long}`);
@@ -6980,13 +7146,21 @@ const argv = yargs.usage(_usage)
 					alias: 'u',
 					description: 'The comma separated list of users to access the site'
 				})
+				.option('addgroups', {
+					alias: 'g',
+					description: 'The comma separated list of groups to access the site'
+				})
 				.option('deleteusers', {
 					alias: 'd',
 					description: 'The comma separated list of users to remove access from the site'
 				})
+				.option('deletegroups', {
+					alias: 'o',
+					description: 'The comma separated list of groups to remove access from the site'
+				})
 				.option('server', {
 					alias: 'r',
-					description: '<server> The registered OCM server'
+					description: 'The registered OCM server'
 				})
 				.check((argv) => {
 					if (argv.signin && !getSiteSignIn().includes(argv.signin)) {
@@ -8499,7 +8673,7 @@ const argv = yargs.usage(_usage)
 				.version(false)
 				.usage(`Usage: cec ${describeWorkflow.command}\n\n${describeWorkflow.usage.long}`);
 		})
-	/** 
+	/**
 	  * 2021-08-20 removed
 	.command([createWordTemplate.command, createWordTemplate.alias], false,
 		(yargs) => {
@@ -9060,6 +9234,10 @@ const argv = yargs.usage(_usage)
 					alias: 'a',
 					description: 'The comma separated list of asset GUIDS'
 				})
+				.option('sourcelanguage', {
+					alias: 'n',
+					description: 'Source language. For use with assets job only.'
+				})
 				.option('languages', {
 					alias: 'l',
 					description: 'The comma separated list of languages used to create the translation job',
@@ -9084,6 +9262,9 @@ const argv = yargs.usage(_usage)
 					if (argv.site && argv.repository) {
 						throw new Error(os.EOL + 'Please specify either site or repository');
 					}
+					if (argv.site && argv.sourcelanguage) {
+						throw new Error(os.EOL + 'sourcelanguage can be specified for assets job only');
+					}
 					if (argv.repository && !argv.collection && !argv.assets && !argv.query) {
 						throw new Error(os.EOL + 'Please specify collection, query or assets');
 					}
@@ -9103,6 +9284,7 @@ const argv = yargs.usage(_usage)
 				.example(...createTranslationJob.example[5])
 				.example(...createTranslationJob.example[6])
 				.example(...createTranslationJob.example[7])
+				.example(...createTranslationJob.example[8])
 				.help(false)
 				.version(false)
 				.usage(`Usage: cec ${createTranslationJob.command}\n\n${createTranslationJob.usage.long}`);
@@ -10405,11 +10587,12 @@ if (fs.existsSync(path.join(appRoot, 'package.json'))) {
 
 // Display command and its params
 // console.log(argv);
-var _displayCommand = function (cmdName) {
+var _displayCommand = function (cmdName, obscureParams) {
 	var cmdStr = 'cec ' + (cmdName || argv._[0]);
 	var paramStr = '';
 	var requiredParamStr = '';
 	var found0 = false;
+	var toObscure = obscureParams || [];
 	Object.keys(argv).forEach(function (name) {
 		if (name === '$0') {
 			found0 = true;
@@ -10418,13 +10601,16 @@ var _displayCommand = function (cmdName) {
 		if (name.length > 1 && name.indexOf('-') < 0 && name !== '$0') {
 			var value = argv[name];
 			if (/^[A-Za-z0-9]*$/.test(value)) {
-				// do nothing 
+				// do nothing
 			} else {
 				try {
 					value = JSON.stringify(value);
 				} catch (e) {
 					// ignore
 				}
+			}
+			if (toObscure.includes(name)) {
+				value = 'xxxxxx';
 			}
 			if (!found0) {
 				paramStr = paramStr + ' ' + '--' + name + ' ' + value;
@@ -10737,6 +10923,9 @@ if (argv._[0] === createComponent.name || argv._[0] == createComponent.alias) {
 	if (argv.excludecontent) {
 		createTemplateArgs.push(...['--excludecontent', argv.excludecontent]);
 	}
+	if (argv.excludetype) {
+		createTemplateArgs.push(...['--excludetype', argv.excludetype]);
+	}
 	if (argv.excludecomponents) {
 		createTemplateArgs.push(...['--excludecomponents', argv.excludecomponents]);
 	}
@@ -10748,6 +10937,9 @@ if (argv._[0] === createComponent.name || argv._[0] == createComponent.alias) {
 	}
 	if (argv.server && typeof argv.server !== 'boolean') {
 		createTemplateArgs.push(...['--server', argv.server]);
+	}
+	if (argv.sourcefiles) {
+		createTemplateArgs.push(...['--sourcefiles', argv.sourcefiles]);
 	}
 	createTemplateArgs.push(...['--name', argv.name]);
 	spawnCmd = childProcess.spawnSync(npmCmd, createTemplateArgs, {
@@ -11590,6 +11782,23 @@ if (argv._[0] === createComponent.name || argv._[0] == createComponent.alias) {
 		stdio: 'inherit'
 	});
 
+} else if (argv._[0] === transferCategoryProperty.name || argv._[0] === transferCategoryProperty.alias) {
+	_displayCommand(transferCategoryProperty.name);
+	let transferCategoryPropertiesArgs = ['run', '-s', transferCategoryProperty.name, '--prefix', appRoot,
+		'--',
+		'--projectDir', cwd,
+		'--name', argv.name,
+		'--server', argv.server,
+		'--destination', argv.destination
+	];
+	if (argv.id) {
+		transferCategoryPropertiesArgs.push(...['--id', argv.id]);
+	}
+	spawnCmd = childProcess.spawnSync(npmCmd, transferCategoryPropertiesArgs, {
+		cwd,
+		stdio: 'inherit'
+	});
+
 } else if (argv._[0] === controlTaxonomy.name || argv._[0] === controlTaxonomy.alias) {
 	_displayCommand(controlTaxonomy.name);
 	let controlTaxonomyArgs = ['run', '-s', controlTaxonomy.name, '--prefix', appRoot,
@@ -11655,6 +11864,28 @@ if (argv._[0] === createComponent.name || argv._[0] == createComponent.alias) {
 		describeTaxonomyArgs.push(...['--server', argv.server]);
 	}
 	spawnCmd = childProcess.spawnSync(npmCmd, describeTaxonomyArgs, {
+		cwd,
+		stdio: 'inherit'
+	});
+
+} else if (argv._[0] === describeCategory.name || argv._[0] === describeCategory.alias) {
+	_displayCommand(describeCategory.name);
+	let describeCategoryArgs = ['run', '-s', describeCategory.name, '--prefix', appRoot,
+		'--',
+		'--projectDir', cwd,
+		'--apiname', argv.apiname,
+		'--taxonomy', argv.taxonomy
+	];
+	if (argv.id) {
+		describeCategoryArgs.push(...['--id', argv.id]);
+	}
+	if (argv.file) {
+		describeCategoryArgs.push(...['--file', argv.file]);
+	}
+	if (argv.server && typeof argv.server !== 'boolean') {
+		describeCategoryArgs.push(...['--server', argv.server]);
+	}
+	spawnCmd = childProcess.spawnSync(npmCmd, describeCategoryArgs, {
 		cwd,
 		stdio: 'inherit'
 	});
@@ -12260,7 +12491,9 @@ if (argv._[0] === createComponent.name || argv._[0] == createComponent.alias) {
 		'--destination', argv.destination,
 		'--pages', argv.pages
 	];
-
+	if (argv.targetsite) {
+		transferSitePageArgs.push(...['--targetsite', argv.targetsite]);
+	}
 	spawnCmd = childProcess.spawnSync(npmCmd, transferSitePageArgs, {
 		cwd,
 		stdio: 'inherit'
@@ -12283,6 +12516,9 @@ if (argv._[0] === createComponent.name || argv._[0] == createComponent.alias) {
 	if (argv.staticonly) {
 		controlSiteArgs.push(...['--staticonly', argv.staticonly]);
 	}
+	if (argv.staticincremental) {
+		controlSiteArgs.push(...['--staticincremental', argv.staticincremental]);
+	}
 	if (argv.compileonly) {
 		controlSiteArgs.push(...['--compileonly', argv.compileonly]);
 	}
@@ -12294,6 +12530,15 @@ if (argv._[0] === createComponent.name || argv._[0] == createComponent.alias) {
 	}
 	if (argv.settingsfiles) {
 		controlSiteArgs.push(...['--settingsfiles', argv.settingsfiles]);
+	}
+	if (argv.pages) {
+		controlSiteArgs.push(...['--pages', argv.pages]);
+	}
+	if (argv.expand) {
+		controlSiteArgs.push(...['--expand', argv.expand]);
+	}
+	if (argv.detailpageassets) {
+		controlSiteArgs.push(...['--detailpageassets', argv.detailpageassets]);
 	}
 	if (argv.theme) {
 		controlSiteArgs.push(...['--theme', argv.theme]);
@@ -12448,8 +12693,14 @@ if (argv._[0] === createComponent.name || argv._[0] == createComponent.alias) {
 	if (argv.addusers) {
 		setSiteSecurityArgs.push(...['--addusers', argv.addusers]);
 	}
+	if (argv.addgroups) {
+		setSiteSecurityArgs.push(...['--addgroups', argv.addgroups]);
+	}
 	if (argv.deleteusers) {
 		setSiteSecurityArgs.push(...['--deleteusers', argv.deleteusers]);
+	}
+	if (argv.deletegroups) {
+		setSiteSecurityArgs.push(...['--deletegroups', argv.deletegroups]);
 	}
 	if (argv.server && typeof argv.server !== 'boolean') {
 		setSiteSecurityArgs.push(...['--server', argv.server]);
@@ -13524,7 +13775,7 @@ if (argv._[0] === createComponent.name || argv._[0] == createComponent.alias) {
 	});
 
 }
-/** 
+/**
 * 2021-08-20 removedelse if (argv._[0] === createWordTemplate.name || argv._[0] === createWordTemplate.alias) {
 	let createWordTemplateArgs = ['run', '-s', createWordTemplate.name, '--prefix', appRoot,
 		'--',
@@ -13546,7 +13797,7 @@ if (argv._[0] === createComponent.name || argv._[0] == createComponent.alias) {
 		stdio: 'inherit'
 	});
 
-} 
+}
 else if (argv._[0] === createContentItem.name || argv._[0] === createContentItem.alias) {
 	let createContentItemArgs = ['run', '-s', createContentItem.name, '--prefix', appRoot,
 		'--',
@@ -13816,6 +14067,9 @@ else if (argv._[0] === uploadType.name || argv._[0] === uploadType.alias) {
 		'--name', argv.name,
 		'--languages', argv.languages
 	];
+	if (argv.sourcelanguage) {
+		createTranslationJobArgs.push(...['--sourcelanguage', argv.sourcelanguage]);
+	}
 	if (argv.site) {
 		createTranslationJobArgs.push(...['--site', argv.site]);
 	}
@@ -14476,7 +14730,7 @@ else if (argv._[0] === uploadType.name || argv._[0] === uploadType.alias) {
 	});
 
 } else if (argv._[0] === registerServer.name || argv._[0] === registerServer.alias) {
-	_displayCommand(registerServer.name);
+	_displayCommand(registerServer.name, ['password']);
 	let registerServerArgs = ['run', '-s', registerServer.name, '--prefix', appRoot,
 		'--',
 		'--projectDir', cwd,
@@ -14859,18 +15113,29 @@ else if (argv._[0] === uploadType.name || argv._[0] === uploadType.alias) {
 		cwd,
 		stdio: 'inherit'
 	});
+} else {
+	if (process.shim) {
+		window.changeT(window.currentTab, `❌ Instance ${window.currentTab}`)
+	}
 }
 
-var endTime = new Date();
-var timeDiff = endTime - startTime; //in ms
-// strip the ms
-timeDiff /= 1000;
-// get seconds
-var seconds = Math.round(timeDiff);
-console.log('Elapsed time: ' + seconds + 's');
 
-// see if need to show deprecation warning
-_checkVersion();
 
-// console.log(spawnCmd);
-process.exit(spawnCmd ? spawnCmd.status : 0);
+if (!process.shim) {
+	var endTime = new Date();
+	var timeDiff = endTime - startTime; //in ms
+	// strip the ms
+	timeDiff /= 1000;
+	// get seconds
+	var seconds = Math.round(timeDiff);
+	console.log('Elapsed time: ' + seconds + 's');
+
+	// see if need to show deprecation warning
+	let runCheckVersion = process.env.CEC_LCM_DOCKER === undefined || process.env.CEC_LCM_DOCKER !== 'true';
+	if (runCheckVersion) {
+		_checkVersion();
+	}
+
+	// console.log(spawnCmd);
+	process.exit(spawnCmd ? spawnCmd.status : 0);
+}

@@ -196,10 +196,10 @@ var _findFolderHierarchy = function (server, rootParentId, folderPathStr) {
 				}
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise passing in the home folder id as the parentID
-			Promise.resolve({
-				id: rootParentId
-			}));
+		// Start with a previousPromise value that is a resolved promise passing in the home folder id as the parentID
+		Promise.resolve({
+			id: rootParentId
+		}));
 
 		doFindFolder.then(function (parentFolder) {
 			if (parentFolder && parentFolder.id) {
@@ -453,8 +453,8 @@ module.exports.getAllChildItems = function (args) {
 				}
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise
-			_getChildItems(args.server, args.parentID, limit));
+		// Start with a previousPromise value that is a resolved promise
+		_getChildItems(args.server, args.parentID, limit));
 
 		doGetItems.then(function (result) {
 			// console.log(childItems.length);
@@ -1266,7 +1266,7 @@ var _unshareFolder = function (server, folderId, userId) {
 			try {
 				data = JSON.parse(body);
 			} catch (e) {
-				// handle non json 
+				// handle non json
 			}
 			if (response && response.statusCode >= 200 && response.statusCode < 300) {
 				resolve(data);
@@ -1615,7 +1615,7 @@ var _queryAllItems = function (useDelivery, server, q, fields, orderBy, limit, o
 		}
 
 		// console.log(' - QUERY_SIZE: ' + QUERY_SIZE + ' limit: ' + limit + ' offset: ' + offset + ' groups: ' + groups.length);
-		// 
+		//
 		// console.log(groups);
 
 		var items = [];
@@ -1644,7 +1644,7 @@ var _queryAllItems = function (useDelivery, server, q, fields, orderBy, limit, o
 				});
 			});
 		},
-			Promise.resolve({}));
+		Promise.resolve({}));
 
 		doGetItems.then(function (result) {
 			return resolve({
@@ -1755,8 +1755,8 @@ var _scrollAllItems = function (useDelivery, server, q, fields, orderBy, limit, 
 				}
 			});
 		},
-			// first scroll
-			_scrollItems(server, url));
+		// first scroll
+		_scrollItems(server, url));
 
 		doGetItems.then(function (result) {
 			if (items.length > 0) {
@@ -1862,11 +1862,20 @@ var _getAllItemIds = function (server, repositoryId, channelId, publishedassets)
 			}
 
 			if (response && response.statusCode === 200) {
+				var ids = [];
+				if (data && data.items) {
+					data.items.forEach(function (item) {
+						if (item && item.id) {
+							ids.push(item.id);
+						}
+					});
+				}
 				return resolve({
 					data: data && data.items,
 					query: query,
 					hasMore: data && data.hasMore,
-					limit: data && data.limit
+					limit: data && data.limit,
+					ids: ids
 				});
 			} else {
 				var msg = data && (data.title || data.errorMessage) ? (data.title || data.errorMessage) : (response.statusMessage || response.statusCode);
@@ -3211,8 +3220,8 @@ var _getAllResources = function (server, endpoint, type, fields, q, orderBy) {
 				}
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise
-			_getResources(server, endpoint, type, fields, 0, q, orderBy));
+		// Start with a previousPromise value that is a resolved promise
+		_getResources(server, endpoint, type, fields, 0, q, orderBy));
 
 		doGetResources.then(function (result) {
 			// console.log(resources.length);
@@ -4505,10 +4514,11 @@ var _getTaxonomies = function (server, fields, offset) {
 			} catch (e) {
 				data = body;
 			}
+
 			if (response && response.statusCode === 200) {
 				resolve(data);
 			} else {
-				var msg = data ? (data.title || data.errorMessage) : (response.statusMessage || response.statusCode);
+				var msg = data && (data.title || data.errorMessage) ? (data.title || data.errorMessage) : (response.statusMessage || response.statusCode);
 				console.error('ERROR: failed to get taxonomies : ' + msg);
 				return resolve({
 					err: 'err'
@@ -4539,8 +4549,8 @@ var _getAllTaxonomies = function (server, fields) {
 				}
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise
-			_getTaxonomies(server, fields));
+		// Start with a previousPromise value that is a resolved promise
+		_getTaxonomies(server, fields));
 
 		doGetResources.then(function (result) {
 			// console.log(resources.length);
@@ -4798,15 +4808,18 @@ module.exports.getCategories = function (args) {
 	return new Promise(function (resolve, reject) {
 		// Currently this API returns duplicate entries when pagination
 		// So use limit 10000 for now
-		var q;
+		var query = args.q || '';
 		if (args.status) {
-			q = 'status eq "' + args.status + '"';
+			if (query) {
+				query = query + ' AND ';
+			}
+			query = query + 'status eq "' + args.status + '"';
 		}
 
 		var url = '/content/management/api/v1.1/taxonomies/' + args.taxonomyId + '/categories';
 		url = url + '?limit=10000';
-		if (q) {
-			url = url + '&q=' + q;
+		if (query) {
+			url = url + '&q=' + query;
 		}
 		if (args.fields) {
 			url = url + '&fields=' + args.fields;
@@ -4845,6 +4858,25 @@ module.exports.getCategories = function (args) {
 	});
 };
 
+/**
+ * Get all category properties of a taxonomy on server
+ * @param {object} args JavaScript object containing parameters.
+ * @param {object} args.server the server object
+ * @param {object} args.taxonomyId the taxonomy Id
+ * @returns {Promise.<object>} The data object returned by the server.
+ */
+module.exports.getCategoryProperties = function (args) {
+	return new Promise(function (resolve, reject) {
+		_getAllResources(args.server, '/content/management/api/v1.1/taxonomies/' + args.taxonomyId + '/categoryProperties',
+			'categoryProperties')
+			.then(function (result) {
+				resolve({
+					taxonomyId: args.taxonomyId,
+					categoryProperties: result
+				});
+			});
+	});
+};
 
 var _getResourcePermissions = function (server, id, type, repositoryId) {
 	return new Promise(function (resolve, reject) {
@@ -8505,8 +8537,8 @@ module.exports.addMembersToGroup = function (args) {
 								});
 						});
 					},
-						// Start with a previousPromise value that is a resolved promise
-						Promise.resolve({}));
+					// Start with a previousPromise value that is a resolved promise
+					Promise.resolve({}));
 
 					doAddMember.then(function (result) {
 						// console.log(resources.length);
@@ -8664,7 +8696,7 @@ var _executeGet = function (server, endpoint, noMsg, headers) {
 				var data;
 				try {
 					data = JSON.parse(body);
-					console.error(data);
+					console.error(JSON.stringify(data));
 				} catch (e) {
 					// in case result is not json
 				}
@@ -9026,6 +9058,7 @@ module.exports.executePut = function (args) {
 module.exports.executePatch = function (args) {
 	return new Promise(function (resolve, reject) {
 		var showDetail = args.noMsg ? false : true;
+		var responseStatus = args.responseStatus ? true : false;
 		var endpoint = args.endpoint;
 		var isCAAS = endpoint.indexOf('/content/management/api/') === 0;
 
@@ -9073,6 +9106,7 @@ module.exports.executePatch = function (args) {
 						});
 					}
 					var data;
+
 					try {
 						data = JSON.parse(body);
 					} catch (e) {
@@ -9086,8 +9120,15 @@ module.exports.executePatch = function (args) {
 						}
 					}
 
-					return resolve(data);
-
+					if (responseStatus) {
+						return resolve({
+							data: data,
+							statusCode: response.statusCode,
+							statusMessage: response.statusMessage
+						});
+					} else {
+						return resolve(data);
+					}
 				});
 			});
 	});
@@ -9477,8 +9518,8 @@ var _cancelScheduledJobs = function (server, ids) {
 			return nextPromise();
 		});
 	},
-		// Start with a previousPromise value that is a resolved promise
-		Promise.resolve());
+	// Start with a previousPromise value that is a resolved promise
+	Promise.resolve());
 };
 
 /**

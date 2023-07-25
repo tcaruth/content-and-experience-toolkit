@@ -39,6 +39,10 @@ var projectDir,
 //
 
 var verifyRun = function (argv) {
+
+	if (process.shim) {
+		return true;
+	}
 	projectDir = argv.projectDir;
 
 	var srcfolder = serverUtils.getSourceFolder(projectDir);
@@ -49,14 +53,6 @@ var verifyRun = function (argv) {
 	templatesSrcDir = path.join(srcfolder, 'templates');
 
 	return true;
-};
-
-var localServer;
-var _cmdEnd = function (done, success) {
-	done(success);
-	if (localServer) {
-		localServer.close();
-	}
 };
 
 var _executeGetExportService = function (args) {
@@ -313,14 +309,14 @@ module.exports.createSite = function (argv, done) {
 	'use strict';
 
 	if (!verifyRun(argv)) {
-		_cmdEnd(done);
+		done();
 		return;
 	}
 
 	var serverName = argv.server;
 	var server = serverUtils.verifyServer(serverName, projectDir);
 	if (!server || !server.valid) {
-		_cmdEnd(done);
+		done();
 		return;
 	}
 
@@ -355,16 +351,16 @@ module.exports.createSite = function (argv, done) {
 
 /**
  * Create a site using REST APIs
- * @param {*} request 
- * @param {*} server 
- * @param {*} name 
- * @param {*} templateName 
- * @param {*} repositoryName 
- * @param {*} localizationPolicyName 
- * @param {*} defaultLanguage 
- * @param {*} description 
- * @param {*} sitePrefix 
- * @param {*} done 
+ * @param {*} request
+ * @param {*} server
+ * @param {*} name
+ * @param {*} templateName
+ * @param {*} repositoryName
+ * @param {*} localizationPolicyName
+ * @param {*} defaultLanguage
+ * @param {*} description
+ * @param {*} sitePrefix
+ * @param {*} done
  */
 var _createSiteREST = function (server, name, templateName, repositoryName, localizationPolicyName,
 	defaultLanguage, description, sitePrefix, updateContent, reuseContent, suppressgovernance, taxonomyName, categoryName, done) {
@@ -454,7 +450,7 @@ var _createSiteREST = function (server, name, templateName, repositoryName, loca
 					console.error('ERROR: localization policy is required to create enterprise site');
 					return Promise.reject();
 				}
-				// Remove this condition when defaultLanguage returned from API /templates 
+				// Remove this condition when defaultLanguage returned from API /templates
 				if (createEnterprise && !defaultLanguage) {
 					console.error('ERROR: default language is required to create enterprise site');
 					return Promise.reject();
@@ -847,7 +843,7 @@ module.exports.copySite = function (argv, done) {
 	});
 };
 
-// 
+//
 // copy site that uses assets from multiple repositories
 // Currently cannot use sites API to copy such sites
 //
@@ -1127,7 +1123,7 @@ var _copySite = function (argv, server, site, targetName, description, sitePrefi
 
 			})
 			.then(function (result) {
-				// delete the site template 
+				// delete the site template
 				return sitesRest.deleteTemplate({
 					server: server,
 					name: templateName,
@@ -1303,7 +1299,7 @@ var _transferStandardSite = function (argv, server, destServer, site, excludecom
 			})
 			.then(function (results) {
 
-				// 
+				//
 				// Exclude the theme
 				// replace with a "default" one
 				//
@@ -1507,7 +1503,7 @@ var _transferStandardSite = function (argv, server, destServer, site, excludecom
 			})
 			.then(function (results) {
 
-				// download static 
+				// download static
 				var downloadStaticFolderPromises = [];
 				if (includestaticfiles) {
 					var staticFileFolder;
@@ -2053,7 +2049,7 @@ module.exports.createSitePage = function (argv, done) {
 						items = results && results[0] && results[0].data || [];
 					}
 
-					// 
+					//
 					// validate components, items and types
 					//
 					var validated = true;
@@ -2211,7 +2207,7 @@ module.exports.createSitePage = function (argv, done) {
 
 					console.info(' - updated site structure');
 
-					// 
+					//
 					// update site used data
 					//
 					var usedDataPromises = [];
@@ -2403,7 +2399,7 @@ module.exports.transferSite = function (argv, done) {
 						_transferStandardSite(argv, server, destServer, site, excludecomponents, excludetheme, suppressgovernance, publishedversion, includestaticfiles)
 							.then(function (result) {
 								var success = result && !result.err;
-								_cmdEnd(done, success);
+								done(success);
 								return;
 							});
 
@@ -2413,7 +2409,7 @@ module.exports.transferSite = function (argv, done) {
 
 						if (!site.channel || !site.channel.localizationPolicy) {
 							console.error('ERROR: failed to get site channel ' + (site.channel ? JSON.stringify(site.channel) : ''));
-							_cmdEnd(done);
+							done();
 							return;
 						}
 
@@ -2618,7 +2614,7 @@ module.exports.transferSite = function (argv, done) {
 
 								var checkSitePrefixPromises = [];
 								if (creatNewSite) {
-									// the same check as CAAS: [site prefix]- 
+									// the same check as CAAS: [site prefix]-
 									var q = 'slug sw "' + (sitePrefix || site.sitePrefix) + '-"';
 									checkSitePrefixPromises.push(serverRest.queryItems({
 										server: destServer,
@@ -2684,7 +2680,7 @@ module.exports.transferSite = function (argv, done) {
 									// console.log(' - content layouts: ' + contentLayoutNames);
 								}
 
-								// 
+								//
 								// Exclude the theme
 								// replace with a "default" one
 								//
@@ -2930,7 +2926,7 @@ module.exports.transferSite = function (argv, done) {
 
 							})
 							.then(function (results) {
-								// download static 
+								// download static
 								var downloadStaticFolderPromises = [];
 								if (includestaticfiles) {
 									var staticFileFolder;
@@ -3003,7 +2999,7 @@ module.exports.transferSite = function (argv, done) {
 												var newPolicy = result;
 												console.info(' - update site localization policy ' + newPolicy.name);
 											}
-											_cmdEnd(done, actionSuccess);
+											done(actionSuccess);
 										});
 									});
 
@@ -3094,17 +3090,17 @@ module.exports.transferSite = function (argv, done) {
 													}
 													var newPolicy = result;
 													console.info(' - update site localization policy ' + newPolicy.name);
-													_cmdEnd(done, success);
+													done(success);
 												})
 												.catch((error) => {
 													if (error) {
 														console.error(error);
 													}
-													_cmdEnd(done);
+													done();
 												});
 
 										} else {
-											_cmdEnd(done);
+											done();
 										}
 									});
 								}
@@ -3114,7 +3110,7 @@ module.exports.transferSite = function (argv, done) {
 								if (error) {
 									console.error(error);
 								}
-								_cmdEnd(done);
+								done();
 							});
 					} // enterprise site
 
@@ -3123,14 +3119,14 @@ module.exports.transferSite = function (argv, done) {
 					if (error) {
 						console.error(error);
 					}
-					_cmdEnd(done);
+					done();
 				}); // get site
 		}) // login
 		.catch((error) => {
 			if (error) {
 				console.error(error);
 			}
-			_cmdEnd(done);
+			done();
 		});
 };
 
@@ -3265,8 +3261,8 @@ var _transferRepoAssets = function (argv, repoMappings, server, destServer, site
 				}
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise 
-			Promise.resolve({}));
+		// Start with a previousPromise value that is a resolved promise
+		Promise.resolve({}));
 
 		transferAssets.then(function (result) {
 			resolve({});
@@ -3330,7 +3326,7 @@ var _verifyOneComponentItemGUID = function (server, compName, itemGUID) {
 			.then(function (result) {
 				if (result && result.id) {
 					// component exists
-					// get its metadata 
+					// get its metadata
 					var compId = result.id;
 					serverUtils.getComponentMetadata(server, compId, compName)
 						.then(function (result) {
@@ -3376,8 +3372,8 @@ var _verifyComponentItemGUID = function (server, comps) {
 					});
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise 
-			Promise.resolve({})
+		// Start with a previousPromise value that is a resolved promise
+		Promise.resolve({})
 		);
 
 		doUpdate.then(function (result) {
@@ -3441,7 +3437,7 @@ var _updateSiteUsedData = function (destServer, idcToken, destSite, siteUsedData
 			}
 		});
 
-		// content items to add 
+		// content items to add
 		siteUsedData.contentItemsUsed.forEach(function (item) {
 			var found = false;
 			for (var i = 0; i < destSiteUsedData.contentItemsUsed.length; i++) {
@@ -3465,7 +3461,7 @@ var _updateSiteUsedData = function (destServer, idcToken, destSite, siteUsedData
 			}
 		});
 
-		// content items to delete 
+		// content items to delete
 		destSiteUsedData.contentItemsUsed.forEach(function (destItem) {
 			var found = false;
 			for (var i = 0; i < siteUsedData.contentItemsUsed.length; i++) {
@@ -3488,7 +3484,7 @@ var _updateSiteUsedData = function (destServer, idcToken, destSite, siteUsedData
 			}
 		});
 
-		// content types to add 
+		// content types to add
 		siteUsedData.contentTypesUsed.forEach(function (type) {
 			var found = false;
 			for (var i = 0; i < destSiteUsedData.contentTypesUsed.length; i++) {
@@ -3510,7 +3506,7 @@ var _updateSiteUsedData = function (destServer, idcToken, destSite, siteUsedData
 				});
 			}
 		});
-		// content types to delete 
+		// content types to delete
 		destSiteUsedData.contentTypesUsed.forEach(function (destType) {
 			var found = false;
 			for (var i = 0; i < siteUsedData.contentTypesUsed.length; i++) {
@@ -3587,8 +3583,8 @@ var _getPages = function (server, pageFiles) {
 				})
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise 
-			Promise.resolve({}));
+		// Start with a previousPromise value that is a resolved promise
+		Promise.resolve({}));
 
 		doQueryPage.then(function (result) {
 			resolve(pageData);
@@ -3817,7 +3813,7 @@ var _updateSitePageUsedData = function (destServer, idcToken, destSite, pageIds,
 		var itemsUsedAdded = [];
 		var itemsUsedDeleted = [];
 
-		// the value in pageIds is number 
+		// the value in pageIds is number
 		// components to add
 		siteUsedData.componentsUsed.forEach(function (comp) {
 			if (pageIds.includes(parseInt(comp.scsPageID))) {
@@ -3868,7 +3864,7 @@ var _updateSitePageUsedData = function (destServer, idcToken, destSite, pageIds,
 			}
 		});
 
-		// content items to add 
+		// content items to add
 		siteUsedData.contentItemsUsed.forEach(function (item) {
 			if (pageIds.includes(parseInt(item.scsPageID))) {
 				var found = false;
@@ -3894,7 +3890,7 @@ var _updateSitePageUsedData = function (destServer, idcToken, destSite, pageIds,
 			}
 		});
 
-		// content items to delete 
+		// content items to delete
 		destSiteUsedData.contentItemsUsed.forEach(function (destItem) {
 			if (pageIds.includes(parseInt(destItem.scsPageID))) {
 				var found = false;
@@ -3919,7 +3915,7 @@ var _updateSitePageUsedData = function (destServer, idcToken, destSite, pageIds,
 			}
 		});
 
-		// content types to add 
+		// content types to add
 		siteUsedData.contentTypesUsed.forEach(function (type) {
 			if (pageIds.includes(parseInt(type.scsPageID))) {
 				var found = false;
@@ -3943,7 +3939,7 @@ var _updateSitePageUsedData = function (destServer, idcToken, destSite, pageIds,
 				}
 			}
 		});
-		// content types to delete 
+		// content types to delete
 		destSiteUsedData.contentTypesUsed.forEach(function (destType) {
 			if (pageIds.includes(parseInt(destType.scsPageID))) {
 				var found = false;
@@ -4195,6 +4191,9 @@ var _addPagesToStructure = function (server, site, srcSiteStructure, destSiteStr
 				}
 			});
 			// update the site structure
+			if (!fs.existsSync(path.join(documentsSrcDir, site.name))) {
+				fs.mkdirSync(path.join(documentsSrcDir, site.name));
+			}
 			let fileName = 'structure.json';
 			let filePath = path.join(documentsSrcDir, site.name, fileName);
 			fs.writeFileSync(filePath, JSON.stringify(destSiteStructure, null, 4));
@@ -4243,6 +4242,7 @@ module.exports.transferSitePage = function (argv, done) {
 	}
 
 	var siteName = argv.name;
+	var targetSiteName = argv.targetsite || siteName;
 	var pageIds = typeof argv.pages === 'number' ? [argv.pages] : argv.pages.split(',');
 	for (let i = 0; i < pageIds.length; i++) {
 		pageIds[i] = parseInt(pageIds[i]);
@@ -4313,18 +4313,18 @@ module.exports.transferSitePage = function (argv, done) {
 			if (!srcSiteChannelToken && tokens.length > 0) {
 				srcSiteChannelToken = tokens[0].value;
 			}
-			console.info(' - verify site on source server (Id: ' + srcSite.id + ', channelToken: ' + srcSiteChannelToken + ')');
+			console.info(' - verify site on source server (Id: ' + srcSite.id + ', channelToken: ' + srcSiteChannelToken + ' theme: ' + srcSite.themeName + ')');
 
 			// verify site on target server
 			return sitesRest.getSite({
 				server: destServer,
-				name: siteName,
+				name: targetSiteName,
 				expand: 'repository'
 			});
 		})
 		.then(function (result) {
 			if (!result || result.err || !result.id) {
-				console.error('ERROR: site ' + siteName + ' does not exist on destination server');
+				console.error('ERROR: site ' + targetSiteName + ' does not exist on destination server');
 				return Promise.reject();
 			}
 			destSite = result;
@@ -4332,7 +4332,12 @@ module.exports.transferSitePage = function (argv, done) {
 				console.error('ERROR: site ' + siteName + ' repository not found on destination server');
 				return Promise.reject();
 			}
-			console.info(' - verify site on destination server (Id: ' + destSite.id + ', repository: ' + destSite.repository.name + ')');
+			console.info(' - verify site on destination server (Id: ' + destSite.id + ', repository: ' + destSite.repository.name + ' theme: ' + destSite.themeName + ')');
+
+			if (siteName !== targetSiteName && srcSite.themeName !== destSite.themeName) {
+				console.error('ERROR: the two sites use different themes');
+				return Promise.reject();
+			}
 
 			// get site structure
 			return documentUtils.getFile({ file: 'site:' + siteName + '/structure.json' }, server);
@@ -4373,7 +4378,7 @@ module.exports.transferSitePage = function (argv, done) {
 			}
 
 			// get site structure on target server
-			return documentUtils.getFile({ file: 'site:' + siteName + '/structure.json' }, destServer);
+			return documentUtils.getFile({ file: 'site:' + targetSiteName + '/structure.json' }, destServer);
 		})
 		.then(function (result) {
 			if (!result || result.err || !result.id || !result.data) {
@@ -4440,7 +4445,7 @@ module.exports.transferSitePage = function (argv, done) {
 
 			pageIdsToTransfer = pageIdsToCreate.concat(pageIdsToUpdate);
 
-			// find folder pages on the source server 
+			// find folder pages on the source server
 			return serverRest.findFolderHierarchy({
 				server: server,
 				parentID: srcSite.id,
@@ -4454,7 +4459,7 @@ module.exports.transferSitePage = function (argv, done) {
 			}
 			srcPagesFolderId = result.id;
 
-			// get page file ids 
+			// get page file ids
 			return serverRest.getAllChildItems({
 				server: server,
 				parentID: srcPagesFolderId
@@ -4622,7 +4627,7 @@ module.exports.transferSitePage = function (argv, done) {
 				console.info(' - site content transferred')
 			}
 
-			// find folder pages on the target server 
+			// find folder pages on the target server
 			return serverRest.findFolderHierarchy({
 				server: destServer,
 				parentID: destSite.id,
@@ -4735,7 +4740,7 @@ module.exports.controlSite = function (argv, done) {
 	'use strict';
 
 	if (!verifyRun(argv)) {
-		_cmdEnd(done);
+		done();
 		return;
 	}
 
@@ -4744,7 +4749,7 @@ module.exports.controlSite = function (argv, done) {
 		var serverName = argv.server;
 		var server = serverUtils.verifyServer(serverName, projectDir);
 		if (!server || !server.valid) {
-			_cmdEnd(done);
+			done();
 			return;
 		}
 
@@ -4757,10 +4762,14 @@ module.exports.controlSite = function (argv, done) {
 		var usedContentOnly = typeof argv.usedcontentonly === 'string' && argv.usedcontentonly.toLowerCase() === 'true';
 		var compileSite = typeof argv.compilesite === 'string' && argv.compilesite.toLowerCase() === 'true';
 		var staticOnly = typeof argv.staticonly === 'string' && argv.staticonly.toLowerCase() === 'true';
+		var staticincremental = typeof argv.staticincremental === 'string' && argv.staticincremental.toLowerCase() === 'true';
 		var compileOnly = typeof argv.compileonly === 'string' && argv.compileonly.toLowerCase() === 'true';
 		var fullpublish = typeof argv.fullpublish === 'string' && argv.fullpublish.toLowerCase() === 'true';
 		var deletestaticfiles = typeof argv.deletestaticfiles === 'string' && argv.deletestaticfiles.toLowerCase() === 'true';
 		var settingsFiles = argv.settingsfiles;
+		var pages = argv.pages;
+		var expand = typeof argv.expand === 'string' && argv.expand.toLowerCase() === 'true';
+		var detailPageAssets = argv.detailpageassets;
 
 		var metadataName = argv.name;
 		var metadataValue = argv.value ? argv.value : '';
@@ -4775,7 +4784,7 @@ module.exports.controlSite = function (argv, done) {
 			}
 
 			_controlSiteREST(server, action, siteName, usedContentOnly, compileSite, staticOnly, compileOnly, fullpublish, theme,
-				metadataName, metadataValue, expireDate, deletestaticfiles, settingsFiles)
+				metadataName, metadataValue, expireDate, deletestaticfiles, settingsFiles, pages, expand, detailPageAssets, staticincremental)
 				.then(function (result) {
 					if (result.err) {
 						done(result.exitCode);
@@ -4793,21 +4802,52 @@ module.exports.controlSite = function (argv, done) {
 
 };
 
+var _getPagesFromStructure = function (server, siteId) {
+	return new Promise(function (resolve, reject) {
+		serverRest.findFile({
+			server: server,
+			parentID: siteId,
+			filename: 'structure.json',
+			itemtype: 'file'
+		}).then(function (result) {
+			if (!result || result.err || !result.id) {
+				return resolve({ err: 'err' });
+			} else {
+				var structureFileId = result.id;
+				serverRest.readFile({
+					server: server,
+					fFileGUID: structureFileId
+				}).then(function (result) {
+					var pages = result && result.pages || [];
+					return resolve({ pages: pages });
+				});
+			}
+		});
+	});
+};
 
 /**
  * Control site using REST APIs
- * @param {*} request 
- * @param {*} server 
- * @param {*} action 
- * @param {*} siteName 
- * @param {*} done 
+ * @param {*} request
+ * @param {*} server
+ * @param {*} action
+ * @param {*} siteName
+ * @param {*} done
  */
 var _controlSiteREST = function (server, action, siteName, usedContentOnly, compileSite, staticOnly, compileOnly, fullpublish, newTheme,
-	metadataName, metadataValue, expireDate, deletestaticfiles, settingsFiles) {
+	metadataName, metadataValue, expireDate, deletestaticfiles, settingsFiles, pages, includeSubPages, detailPageAssets, staticincremental) {
 
 	return new Promise(function (resolve, reject) {
 		var exitCode;
 		var goverancePromises = action === 'expire' ? [serverUtils.getSitesGovernance(server)] : [];
+		var site;
+		var runtimeStatus;
+		var publishStatus;
+		var themeName;
+		var validPageIds = [];
+		var allPageIds = [];
+		var goodDetailPageAssets;
+		var goodAssetIds = [];
 		Promise.all(goverancePromises)
 			.then(function (results) {
 				if (action === 'expire') {
@@ -4820,7 +4860,8 @@ var _controlSiteREST = function (server, action, siteName, usedContentOnly, comp
 
 				return sitesRest.getSite({
 					server: server,
-					name: siteName
+					name: siteName,
+					expand: 'channel,repository'
 				})
 			})
 			.then(function (result) {
@@ -4828,10 +4869,10 @@ var _controlSiteREST = function (server, action, siteName, usedContentOnly, comp
 					return Promise.reject();
 				}
 
-				var site = result;
-				var runtimeStatus = site.runtimeStatus;
-				var publishStatus = site.publishStatus;
-				var themeName = site.themeName;
+				site = result;
+				runtimeStatus = site.runtimeStatus;
+				publishStatus = site.publishStatus;
+				themeName = site.themeName;
 
 				console.info(' - get site: runtimeStatus: ' + runtimeStatus + '  publishStatus: ' + publishStatus + '  theme: ' + themeName);
 
@@ -4864,18 +4905,141 @@ var _controlSiteREST = function (server, action, siteName, usedContentOnly, comp
 					return Promise.reject();
 				}
 
-				// user publish-internal for incremental publish until support available in REST API
-				var incrementalPublish = !!(process.env.CEC_TOOLKIT_INCREMENTAL_COMPILE_FILE);
-				if ((action === 'publish') && incrementalPublish) {
-					console.log(' - incremental publish, using publish-internal');
-					action = 'publish-internal';
+				var pagesPromises = [];
+				if (pages || detailPageAssets) {
+					pagesPromises.push(_getPagesFromStructure(server, site.id));
+				}
+
+				return Promise.all(pagesPromises);
+
+			})
+			.then(function (results) {
+
+				if (pages) {
+					if (!results || !results[0] || results[0].err) {
+						return Promise.reject();
+					}
+					let structurePages = results[0].pages;
+					// console.log(structurePages);
+					if (pages) {
+						var pageIds = typeof pages === 'number' ? [pages.toString()] : pages.split(',');
+						pageIds.forEach(function (id) {
+							let pageExist = false;
+							for (let i = 0; i < structurePages.length; i++) {
+								if (id === structurePages[i].id.toString()) {
+									pageExist = true;
+									break;
+								}
+							}
+							if (pageExist) {
+								validPageIds.push(id);
+							} else {
+								console.error('ERROR: page ' + id + ' does not exist');
+							}
+						});
+					}
+
+					validPageIds.forEach(function (parentId) {
+						if (!allPageIds.includes(parentId)) {
+							allPageIds.push(parentId);
+						}
+						if (includeSubPages) {
+							let childIds = [];
+							let siteStructure = { pages: structurePages };
+							_getChildPages(siteStructure, parentId, childIds);
+							for (let i = 0; i < childIds.length; i++) {
+								if (!allPageIds.includes(childIds[i])) {
+									allPageIds.push(childIds[i]);
+								}
+							}
+						}
+					});
+					console.info(' - pages: ' + allPageIds);
+
+				}
+
+				let validateAssetsPromises = [];
+				if (detailPageAssets) {
+					if (!results || !results[0] || results[0].err) {
+						return Promise.reject();
+					}
+					let structurePages = results[0].pages;
+
+					// the param value: <detailpageid>:<asset id>,...,<asset id>
+					let parts = detailPageAssets.split(':');
+					let detailPageId = parts[0];
+					let assetIds = parts[1].split(',');
+					// validate the detail page
+					let detailPage = undefined
+					for (let i = 0; i < structurePages.length; i++) {
+						if (detailPageId === structurePages[i].id.toString()) {
+							detailPage = structurePages[i];
+							break;
+						}
+					}
+					if (!detailPage) {
+						console.error('ERROR: page ' + detailPageId + ' does not exist');
+						return Promise.reject();
+					}
+					if (!detailPage.isDetailPage) {
+						console.error('ERROR: page ' + detailPageId + ' is not a detail page');
+						return Promise.reject();
+					}
+					console.info(' - validate detail page (Id: ' + detailPage.id + ' Name: ' + detailPage.name + ')');
+
+					// validate assets
+					let q = '';
+					if (site.repository && site.repository.id) {
+						q = '(repositoryId eq "' + site.repository.id + '")';
+					}
+					if (site.channel && site.channel.id) {
+						if (q) {
+							q = q + ' AND ';
+						}
+						q = q + '(channels co "' + site.channel.id + '")';
+					}
+
+					validateAssetsPromises.push(contentUtils.queryItemsWithIds(server, q, assetIds));
+				}
+
+				return Promise.all(validateAssetsPromises);
+
+			})
+			.then(function (results) {
+				if (detailPageAssets) {
+					let items = results && results[0] || [];
+					let parts = detailPageAssets.split(':');
+					let detailPageId = parts[0];
+					let assetIds = parts[1].split(',');
+					assetIds.forEach(function (id) {
+						let found = false;
+						for (let i = 0; i < items.length; i++) {
+							if (id === items[i].id) {
+								found = true;
+								goodAssetIds.push(id);
+								break;
+							}
+						}
+						if (!found) {
+							console.error('ERROR: asset ' + id + ' is not in site channel');
+						}
+					});
+
+					goodDetailPageAssets = detailPageId + ':' + goodAssetIds.join(',');
+				}
+
+				// process will continue if one of the three option is valid
+				if (!settingsFiles && (pages || detailPageAssets)) {
+					if ((!pages || validPageIds.length === 0) && (!detailPageAssets || goodAssetIds.length === 0)) {
+						return Promise.reject();
+					}
 				}
 
 				var actionPromise;
 				if (action === 'publish') {
-					if (settingsFiles) {
-						let usedContentOnly, compileSite, staticOnly, compileOnly, fullpublish, deletestaticfiles;
-						actionPromise = _publishSiteInternal(server, site.id, site.name, usedContentOnly, compileSite, staticOnly, compileOnly, fullpublish, deletestaticfiles, settingsFiles)
+					if (settingsFiles || pages || detailPageAssets) {
+						let usedContentOnly, compileSite, staticOnly, staticincremental, compileOnly, fullpublish, deletestaticfiles;
+						actionPromise = _publishSiteInternal(server, site.id, site.name, usedContentOnly, compileSite, staticOnly, compileOnly, fullpublish, deletestaticfiles, settingsFiles, allPageIds, goodDetailPageAssets, staticincremental)
 					} else {
 						actionPromise = sitesRest.publishSite({
 							server: server,
@@ -4883,6 +5047,7 @@ var _controlSiteREST = function (server, action, siteName, usedContentOnly, comp
 							usedContentOnly: usedContentOnly,
 							compileSite: compileSite,
 							staticOnly: staticOnly,
+							staticincremental: staticincremental,
 							compileOnly: compileOnly,
 							fullpublish: fullpublish,
 							deletestaticfiles: deletestaticfiles
@@ -4890,7 +5055,7 @@ var _controlSiteREST = function (server, action, siteName, usedContentOnly, comp
 					}
 				} else if (action === 'publish-internal') {
 					console.log(' - publish site using Idc service');
-					actionPromise = _publishSiteInternal(server, site.id, site.name, usedContentOnly, compileSite, staticOnly, compileOnly, fullpublish, deletestaticfiles, settingsFiles);
+					actionPromise = _publishSiteInternal(server, site.id, site.name, usedContentOnly, compileSite, staticOnly, compileOnly, fullpublish, deletestaticfiles, settingsFiles, allPageIds, goodDetailPageAssets, staticincremental);
 
 				} else if (action === 'unpublish') {
 					actionPromise = sitesRest.unpublishSite({
@@ -4951,8 +5116,20 @@ var _controlSiteREST = function (server, action, siteName, usedContentOnly, comp
 					}
 				} else if (action === 'expire') {
 					console.log(' - site expires at ' + result.expiresAt);
-				} else if (settingsFiles) {
-					console.log(' - site settings files ' + settingsFiles + ' published');
+				} else if (action === 'publish' || action === 'publish-internal') {
+					if (settingsFiles || pages || detailPageAssets) {
+						if (settingsFiles) {
+							console.log(' - site settings files ' + settingsFiles + ' published');
+						}
+						if (allPageIds.length > 0) {
+							console.log(' - site page ' + allPageIds + ' published');
+						}
+						if (goodAssetIds.length > 0) {
+							console.log(' - detail page assets ' + goodDetailPageAssets + ' published');
+						}
+					} else {
+						console.log(' - ' + action + ' ' + siteName + ' finished');
+					}
 				} else {
 					console.log(' - ' + action + ' ' + siteName + ' finished');
 				}
@@ -5014,7 +5191,7 @@ var _setSiteMetadata = function (server, siteId, siteName, metadataName, metadat
 /**
  * Publish a site using IdcService (compile site workaround)
  */
-var _publishSiteInternal = function (server, siteId, siteName, usedContentOnly, compileSite, staticOnly, compileOnly, fullpublish, deletestaticfiles, settingsFiles) {
+var _publishSiteInternal = function (server, siteId, siteName, usedContentOnly, compileSite, staticOnly, compileOnly, fullpublish, deletestaticfiles, settingsFiles, pageIds, detailPageAssets, staticincremental) {
 	return new Promise(function (resolve, reject) {
 
 		serverUtils.getIdcToken(server)
@@ -5047,7 +5224,7 @@ var _publishSiteInternal = function (server, siteId, siteName, usedContentOnly, 
 				if (staticOnly) {
 					body.LocalData.doStaticFilePublishOnly = true;
 
-					if (process.env.CEC_TOOLKIT_INCREMENTAL_COMPILE_FILE) {
+					if (staticincremental || process.env.CEC_TOOLKIT_INCREMENTAL_COMPILE_FILE) {
 						body.LocalData.selectiveStaticPublish = true;
 					}
 				}
@@ -5063,7 +5240,21 @@ var _publishSiteInternal = function (server, siteId, siteName, usedContentOnly, 
 				if (settingsFiles) {
 					body.LocalData.siteSettings = settingsFiles;
 				}
-
+				if (pageIds && pageIds.length > 0) {
+					body.LocalData.pages = pageIds.join(',');
+				}
+				if (detailPageAssets) {
+					let parts = detailPageAssets.split(':');
+					let detailPageId = parts[0];
+					let assetIds = parts[1].split(',');
+					body.LocalData.assets = parts[1];
+					body.LocalData.pageDetails = JSON.stringify({
+						detailPages: [{
+							pageId: detailPageId,
+							assets: assetIds
+						}]
+					});
+				}
 				var postData = {
 					method: 'POST',
 					url: url,
@@ -5121,12 +5312,9 @@ var _publishSiteInternal = function (server, siteId, siteName, usedContentOnly, 
 							});
 							jobPromise.then(function (data) {
 								// console.log(data);
-								if (!data || data.error || !data.progress || data.progress === 'failed' || data.progress === 'aborted') {
+								if (!data || data.error || data.err || !data.progress || data.progress === 'failed' || data.progress === 'aborted') {
 									clearInterval(inter);
-									if (needNewLine) {
-										process.stdout.write(os.EOL);
-									}
-									var msg = data && data.message;
+									var msg = data && data.message || data && data.err;
 									if (data && data.error) {
 										msg = msg + ' ' + (data.error.detail || data.error.title);
 									}
@@ -5170,7 +5358,7 @@ module.exports.shareSite = function (argv, done) {
 	'use strict';
 
 	if (!verifyRun(argv)) {
-		_cmdEnd(done);
+		done();
 		return;
 	}
 
@@ -5178,7 +5366,7 @@ module.exports.shareSite = function (argv, done) {
 		var serverName = argv.server;
 		var server = serverUtils.verifyServer(serverName, projectDir);
 		if (!server || !server.valid) {
-			_cmdEnd(done);
+			done();
 			return;
 		}
 
@@ -5348,14 +5536,14 @@ module.exports.shareSite = function (argv, done) {
 							console.error('ERROR: ' + results[i].title);
 						}
 					}
-					_cmdEnd(done, shared);
+					done(shared);
 				})
 				.catch((error) => {
-					_cmdEnd(done);
+					done();
 				});
 		}); // login
 	} catch (e) {
-		_cmdEnd(done);
+		done();
 	}
 };
 
@@ -5367,7 +5555,7 @@ module.exports.unshareSite = function (argv, done) {
 	'use strict';
 
 	if (!verifyRun(argv)) {
-		_cmdEnd(done);
+		done();
 		return;
 	}
 
@@ -5375,7 +5563,7 @@ module.exports.unshareSite = function (argv, done) {
 		var serverName = argv.server;
 		var server = serverUtils.verifyServer(serverName, projectDir);
 		if (!server || !server.valid) {
-			_cmdEnd(done);
+			done();
 			return;
 		}
 
@@ -5546,14 +5734,14 @@ module.exports.unshareSite = function (argv, done) {
 							console.error('ERROR: ' + results[i].title);
 						}
 					}
-					_cmdEnd(done, unshared);
+					done(unshared);
 				})
 				.catch((error) => {
-					_cmdEnd(done);
+					done();
 				});
 		}); // login
 	} catch (e) {
-		_cmdEnd(done);
+		done();
 	}
 };
 
@@ -5636,7 +5824,6 @@ module.exports.deleteSite = function (argv, done) {
 
 	}); // login
 };
-
 
 /**
  * export site
@@ -5746,7 +5933,12 @@ module.exports.exportSite = function (argv, done) {
 								// If download path is specified, then save to the specified path.
 
 								// TODO: Use job name temporary. Might need to get the site name.
-								var targetPath = path.join(projectDir, 'src', 'siteExport', data.job.name);
+								var targetPath = argv.path ? path.normalize(argv.path) : path.join(projectDir, 'src', 'siteExport', data.job.name);
+
+								// Make relative path absolute
+								if (!path.isAbsolute(targetPath)) {
+									targetPath = path.join(projectDir, targetPath);
+								}
 
 								// Remove target path if exists.
 								if (fs.existsSync(targetPath)) {
@@ -5812,7 +6004,7 @@ module.exports.importSite = function (argv, done) {
 
 		var siteName = argv.name,
 			inputFolder = argv.folder,
-			uploadPath = argv.path || path.join(projectDir, 'src', 'siteExport', siteName),
+			uploadPath = argv.path ? path.normalize(argv.path) : path.join(projectDir, 'src', 'siteExport', siteName),
 			folderName = uploadPath.split(path.sep).pop(),
 			folderPathName = inputFolder || folderName,
 			jobName = argv.jobname || argv.newsite || siteName,
@@ -5843,7 +6035,7 @@ module.exports.importSite = function (argv, done) {
 				};
 
 				documentUtils.deleteFolder(deleteArgv, server).then(function (result) {
-					console.info('importSite deleteFolder ' + folderName);
+					console.info(' - importSite deleteFolder ' + folderName);
 					resolve();
 				}).catch((error) => {
 					resolve();
@@ -5874,10 +6066,10 @@ module.exports.importSite = function (argv, done) {
 				.then(function (repos) {
 					var repo = repos[0];
 					if (!repo || repo.err) {
-						return Promise.reject('ImportSite failed to get repository ' + repository);
+						return Promise.reject('failed to get repository ' + repository);
 					}
 					if (!repo.data || !repo.data.id) {
-						return Promise.reject('ImportSite: repository ' + repository + ' does not exist');
+						return Promise.reject('repository ' + repository + ' does not exist');
 					} else {
 						importRepo = repo.data;
 
@@ -5898,14 +6090,14 @@ module.exports.importSite = function (argv, done) {
 					if (localizationPolicy) {
 						var l10P = l10Ps[0][0];
 						if (!l10P || l10P.err) {
-							return Promise.reject('ImportSite failed to get localizationPolicy ' + localizationPolicy);
+							return Promise.reject('failed to get localizationPolicy ' + localizationPolicy);
 						}
-						console.log('l10P.id ' + l10P.id + ' l10P.name ' + l10P.name);
+						console.log('   l10P.id ' + l10P.id + ' l10P.name ' + l10P.name);
 						if (!l10P.id) {
-							return Promise.reject('ImportSite: localizationPolicy ' + localizationPolicy + ' does not exist');
+							return Promise.reject('localizationPolicy ' + localizationPolicy + ' does not exist');
 						}
 						importL10P = l10P;
-						console.log('localizationPolicy ' + localizationPolicy + ' id ' + importL10P.id);
+						console.log('   localizationPolicy ' + localizationPolicy + ' id ' + importL10P.id);
 					}
 					var deletePromises = [];
 					if (!inputFolder) {
@@ -5917,7 +6109,12 @@ module.exports.importSite = function (argv, done) {
 					var uploadPromises = [];
 
 					if (!inputFolder) {
-						console.log('ImportSite: Upload site files from ' + uploadPath);
+
+						// Make relative path absolute
+						if (!path.isAbsolute(uploadPath)) {
+							uploadPath = path.join(projectDir, uploadPath);
+						}
+						console.log(' - ImportSite: Upload site files from ' + uploadPath);
 						var uploadArgv = {
 							path: uploadPath
 						};
@@ -5939,7 +6136,7 @@ module.exports.importSite = function (argv, done) {
 				})
 				.then(function (folders) {
 					if (!folders[0] || !folders[0].id) {
-						return Promise.reject('ImportSite: import folder ' + folderPathName + ' not found');
+						return Promise.reject('import folder ' + folderPathName + ' not found');
 					} else {
 						var createArchivePromises = [];
 
@@ -6004,12 +6201,12 @@ module.exports.importSite = function (argv, done) {
 					}
 				})
 				.catch(function (error) {
-					console.error('   ImportSite encountered ' + error);
+					console.error('ImportSite encountered: ' + error);
 					done();
 				});
 
 		}).catch(function (error) {
-			console.error('   ImportSite encountered ' + error);
+			console.error('ImportSite encountered: ' + error);
 			done();
 		})
 	} catch (e) {
@@ -6743,34 +6940,34 @@ module.exports.describeImportJob = function (argv, done) {
 
 					job.targets.forEach((t) => {
 						switch (t.apply.policies) {
-							case 'createSite':
-								console.log(sprintf(jobFormat, 'Import Policy', 'Create Site from Archive'));
-								console.log(sprintf(jobFormat, 'Assets policy', t.apply.createSite.assetsPolicy));
-								if (repositoryName) {
-									console.log(sprintf(jobFormat, 'Target Asset Repository', repositoryName));
-								} else {
-									console.log(sprintf(jobFormat, 'Target Asset Repository Id', t.apply.createSite.site.repository.id));
-								}
-								break;
-							case 'updateSite':
-								console.log(sprintf(jobFormat, 'Import Policy', 'Update Site from Archive'));
-								console.log(sprintf(jobFormat, 'Assets policy', t.apply.updateSite.assetsPolicy));
-								if (repositoryName) {
-									console.log(sprintf(jobFormat, 'Target Asset Repository', repositoryName));
-								} else {
-									console.log(sprintf(jobFormat, 'Target Asset Repository Id', t.apply.updateSite.site.repository.id));
-								}
-								break;
-							case 'duplicateSite':
-								console.log(sprintf(jobFormat, 'Import Policy', 'Duplicate Site from Archive'));
-								console.log(sprintf(jobFormat, 'Assets policy', t.apply.duplicateSite.assetsPolicy));
-								if (repositoryName) {
-									console.log(sprintf(jobFormat, 'Target Asset Repository', repositoryName));
-								} else {
-									console.log(sprintf(jobFormat, 'Target Asset Repository Id', t.apply.duplicateSite.site.repository.id));
-								}
-								break;
-							default:
+						case 'createSite':
+							console.log(sprintf(jobFormat, 'Import Policy', 'Create Site from Archive'));
+							console.log(sprintf(jobFormat, 'Assets policy', t.apply.createSite.assetsPolicy));
+							if (repositoryName) {
+								console.log(sprintf(jobFormat, 'Target Asset Repository', repositoryName));
+							} else {
+								console.log(sprintf(jobFormat, 'Target Asset Repository Id', t.apply.createSite.site.repository.id));
+							}
+							break;
+						case 'updateSite':
+							console.log(sprintf(jobFormat, 'Import Policy', 'Update Site from Archive'));
+							console.log(sprintf(jobFormat, 'Assets policy', t.apply.updateSite.assetsPolicy));
+							if (repositoryName) {
+								console.log(sprintf(jobFormat, 'Target Asset Repository', repositoryName));
+							} else {
+								console.log(sprintf(jobFormat, 'Target Asset Repository Id', t.apply.updateSite.site.repository.id));
+							}
+							break;
+						case 'duplicateSite':
+							console.log(sprintf(jobFormat, 'Import Policy', 'Duplicate Site from Archive'));
+							console.log(sprintf(jobFormat, 'Assets policy', t.apply.duplicateSite.assetsPolicy));
+							if (repositoryName) {
+								console.log(sprintf(jobFormat, 'Target Asset Repository', repositoryName));
+							} else {
+								console.log(sprintf(jobFormat, 'Target Asset Repository Id', t.apply.duplicateSite.site.repository.id));
+							}
+							break;
+						default:
 						}
 
 						if (t.select.type === 'site') {
@@ -7536,7 +7733,7 @@ var _getPageLayouts = function (server, pages) {
 					})
 			});
 		},
-			Promise.resolve({})
+		Promise.resolve({})
 		);
 
 		doGetPages.then(function (result) {
@@ -7609,6 +7806,7 @@ module.exports.describeSite = function (argv, done) {
 		var componentsUsed, contentItemsUsed, contentTypesUsed;
 		var totalItems = 0;
 		var totalMasterItems = 0;
+		var otherItems = [];
 		var pageTranslations = 0;
 		var format1 = '%-38s  %-s';
 
@@ -7631,7 +7829,7 @@ module.exports.describeSite = function (argv, done) {
 				// console.log(site);
 
 				// find master items in the site channel
-				var itemPromises = [];
+				let itemPromises = [];
 				if (site.isEnterprise && site.channel && site.channel.id) {
 					var q = 'channels co "' + site.channel.id + '" AND languageIsMaster eq "true"';
 					itemPromises.push(serverRest.queryItems({
@@ -7652,7 +7850,7 @@ module.exports.describeSite = function (argv, done) {
 				}
 
 				// find items in the site channel
-				var itemPromises = [];
+				let itemPromises = [];
 				if (site.isEnterprise && site.channel && site.channel.id) {
 					var q = 'channels co "' + site.channel.id + '"';
 					itemPromises.push(serverRest.queryItems({
@@ -7672,8 +7870,29 @@ module.exports.describeSite = function (argv, done) {
 					totalItems = results && results[0] && results[0].limit;
 				}
 
-				// get site metadata
+				// find items from other repositories
+				let itemPromises = [];
+				if (site.isEnterprise && site.channel && site.channel.id && site.repository && site.repository.id) {
+					var q = 'repositoryId ne "' + site.repository.id + '" AND channels co "' + site.channel.id + '"';
+					itemPromises.push(serverRest.queryItems({
+						server: server,
+						q: q,
+						limit: 1,
+						showTotal: false
+					}));
+				}
 
+				return Promise.all(itemPromises);
+
+			})
+			.then(function (results) {
+
+				if (site.isEnterprise) {
+					// console.log(results[0]);
+					otherItems = results && results[0] && results[0].limit;
+				}
+
+				// get site metadata
 				return serverUtils.getSiteMetadata(server, site.id, site.name);
 
 			})
@@ -7853,6 +8072,7 @@ module.exports.describeSite = function (argv, done) {
 				if (site.isEnterprise) {
 					console.log(sprintf(format1, 'Total master items', totalMasterItems));
 					console.log(sprintf(format1, 'Total items', totalItems));
+					console.log(sprintf(format1, 'Total items from other repositories', otherItems));
 				}
 
 				if (siteMetadata) {
@@ -7885,6 +8105,7 @@ module.exports.describeSite = function (argv, done) {
 						}
 					});
 
+					componentsUsedPageIds.sort((a, b) => a - b);
 					for (let i = 0; i < componentsUsedPageIds.length; i++) {
 						let comps = [];
 						componentsUsed.forEach(function (comp) {
@@ -7892,6 +8113,7 @@ module.exports.describeSite = function (argv, done) {
 								comps.push(comp.scsComponentName);
 							}
 						});
+						comps.sort();
 						console.log(sprintf(format2, componentsUsedPageIds[i], comps.join(', ')));
 					}
 				}
@@ -7906,6 +8128,7 @@ module.exports.describeSite = function (argv, done) {
 						}
 					});
 
+					assetsUsedPageIds.sort((a, b) => a - b);
 					for (let i = 0; i < assetsUsedPageIds.length; i++) {
 						let items = [];
 						contentItemsUsed.forEach(function (item) {
@@ -7913,6 +8136,7 @@ module.exports.describeSite = function (argv, done) {
 								items.push(item.scsContentItemID);
 							}
 						});
+						items.sort();
 						console.log(sprintf(format2, assetsUsedPageIds[i], items.join(', ')));
 					}
 				}
@@ -7926,7 +8150,7 @@ module.exports.describeSite = function (argv, done) {
 							typesUsedPageIds.push(type.scsPageID);
 						}
 					});
-
+					typesUsedPageIds.sort((a, b) => a - b);
 					for (let i = 0; i < typesUsedPageIds.length; i++) {
 						let types = [];
 						contentTypesUsed.forEach(function (type) {
@@ -7934,6 +8158,7 @@ module.exports.describeSite = function (argv, done) {
 								types.push(type.scsTypeName);
 							}
 						});
+						types.sort();
 						console.log(sprintf(format2, typesUsedPageIds[i], types.join(', ')));
 					}
 				}
@@ -7958,7 +8183,7 @@ module.exports.describeSite = function (argv, done) {
 				if (!pagesFileId) {
 					return Promise.reject();
 				}
-				// get page file ids 
+				// get page file ids
 				return serverRest.getAllChildItems({
 					server: server,
 					parentID: pagesFileId
@@ -8351,14 +8576,14 @@ module.exports.setSiteSecurity = function (argv, done) {
 	'use strict';
 
 	if (!verifyRun(argv)) {
-		_cmdEnd(done);
+		done();
 		return;
 	}
 
 	var serverName = argv.server;
 	var server = serverUtils.verifyServer(serverName, projectDir);
 	if (!server || !server.valid) {
-		_cmdEnd(done);
+		done();
 		return;
 	}
 
@@ -8368,6 +8593,8 @@ module.exports.setSiteSecurity = function (argv, done) {
 	var access = argv.access;
 	var addUserNames = argv.addusers ? argv.addusers.split(',') : [];
 	var deleteUserNames = argv.deleteusers ? argv.deleteusers.split(',') : [];
+	var addGroupNames = argv.addgroups ? argv.addgroups.split(',') : [];
+	var deleteGroupNames = argv.deletegroups ? argv.deletegroups.split(',') : [];
 
 	if (signin === 'no') {
 		if (access) {
@@ -8380,11 +8607,21 @@ module.exports.setSiteSecurity = function (argv, done) {
 			console.log(' - ignore argument <deleteusers>');
 		}
 	} else {
-		for (var i = 0; i < deleteUserNames.length; i++) {
-			for (var j = 0; j < addUserNames.length; j++) {
+		for (let i = 0; i < deleteUserNames.length; i++) {
+			for (let j = 0; j < addUserNames.length; j++) {
 				if (deleteUserNames[i].toLowerCase() === addUserNames[j].toLowerCase()) {
 					console.error('ERROR: user ' + deleteUserNames[i] + ' in both <addusers> and <deleteusers>');
-					_cmdEnd(done);
+					done();
+					return;
+				}
+			}
+		}
+
+		for (let i = 0; i < deleteGroupNames.length; i++) {
+			for (let j = 0; j < addGroupNames.length; j++) {
+				if (deleteGroupNames[i].toLowerCase() === addGroupNames[j].toLowerCase()) {
+					console.error('ERROR: group ' + deleteGroupNames[i] + ' in both <addgroups> and <deletegroups>');
+					done();
 					return;
 				}
 			}
@@ -8392,11 +8629,11 @@ module.exports.setSiteSecurity = function (argv, done) {
 	}
 
 
-	_setSiteSecurityREST(server, name, signin, access, addUserNames, deleteUserNames, done);
+	_setSiteSecurityREST(server, name, signin, access, addUserNames, deleteUserNames, addGroupNames, deleteGroupNames, done);
 
 };
 
-var _setSiteSecurityREST = function (server, name, signin, access, addUserNames, deleteUserNames, done) {
+var _setSiteSecurityREST = function (server, name, signin, access, addUserNames, deleteUserNames, addGroupNames, deleteGroupNames, done) {
 	try {
 
 		var exitCode;
@@ -8412,7 +8649,10 @@ var _setSiteSecurityREST = function (server, name, signin, access, addUserNames,
 			var siteSecurity;
 			var siteMembers = [];
 			var users = [];
+			var groups = [];
 			var accessValues = [];
+			var userErr = false;
+			var groupErr = false;
 
 			sitesRest.getSite({
 				server: server,
@@ -8478,12 +8718,11 @@ var _setSiteSecurityREST = function (server, name, signin, access, addUserNames,
 							}
 
 							console.info(' - verify users');
-							var err = false;
 							// verify users
 							for (var k = 0; k < addUserNames.length; k++) {
 								var found = false;
 								for (let i = 0; i < allUsers.length; i++) {
-									if (allUsers[i].loginName.toLowerCase() === addUserNames[k].toLowerCase()) {
+									if (allUsers[i].loginName && allUsers[i].loginName.toLowerCase() === addUserNames[k].toLowerCase()) {
 										if (!siteMembers.includes(allUsers[i].loginName)) {
 											var user = allUsers[i];
 											user['action'] = 'add';
@@ -8496,9 +8735,10 @@ var _setSiteSecurityREST = function (server, name, signin, access, addUserNames,
 										break;
 									}
 								}
+
 								if (!found) {
 									console.error('ERROR: user ' + addUserNames[k] + ' does not exist');
-									err = true;
+									userErr = true;
 								}
 							}
 							for (let k = 0; k < deleteUserNames.length; k++) {
@@ -8519,14 +8759,87 @@ var _setSiteSecurityREST = function (server, name, signin, access, addUserNames,
 								}
 								if (!found) {
 									console.error('ERROR: user ' + deleteUserNames[k] + ' does not exist');
-									err = true;
+									userErr = true;
+								}
+							}
+						}
+					}
+
+					var groupPromises = [];
+					if (signin === 'yes') {
+						// console.log(' - add groups: ' + addGroupNames);
+						// console.log(' - delete groups: ' + deleteGroupNames);
+						for (let i = 0; i < addGroupNames.length; i++) {
+							groupPromises.push(serverRest.getGroup({
+								server: server,
+								name: addGroupNames[i]
+							}));
+						}
+						for (let i = 0; i < deleteGroupNames.length; i++) {
+							groupPromises.push(serverRest.getGroup({
+								server: server,
+								name: deleteGroupNames[i]
+							}));
+						}
+					}
+					return Promise.all(groupPromises);
+
+				})
+				.then(function (results) {
+
+					if (signin === 'yes' && (addGroupNames.length > 0 || deleteGroupNames.length > 0)) {
+						var allGroups = results || [];
+						// console.log(allGroups);
+						console.info(' - verify groups');
+						// verify users
+						for (let k = 0; k < addGroupNames.length; k++) {
+							var found = false;
+							for (let i = 0; i < allGroups.length; i++) {
+								if (allGroups[i].name && allGroups[i].name.toLowerCase() === addGroupNames[k].toLowerCase()) {
+									if (!siteMembers.includes(allGroups[i].name)) {
+										let group = allGroups[i];
+										group['action'] = 'add';
+										groups.push(allGroups[i]);
+									}
+									found = true;
+									break;
+								}
+								if (found) {
+									break;
+								}
+							}
+							if (!found) {
+								console.error('ERROR: group ' + addGroupNames[k] + ' does not exist');
+								groupErr = true;
+							}
+						}
+
+						for (let k = 0; k < deleteGroupNames.length; k++) {
+							let found = false;
+							for (let i = 0; i < allGroups.length; i++) {
+								if (allGroups[i].name && allGroups[i].name.toLowerCase() === deleteGroupNames[k].toLowerCase()) {
+									if (siteMembers.includes(allGroups[i].name)) {
+										let group = allGroups[i];
+										group.action = 'delete';
+										groups.push(allGroups[i]);
+									}
+									found = true;
+									break;
+								}
+								if (found) {
+									break;
 								}
 							}
 
-							if (err && users.length === 0) {
-								return Promise.reject();
+							if (!found) {
+								console.error('ERROR: group' + deleteGroupNames[k] + ' does not exist');
+								groupErr = true;
 							}
 						}
+					}
+
+					if (userErr && users.length === 0 && groupErr && groups.length === 0) {
+						return Promise.reject();
 					}
 
 					if (!access || access.includes('Cloud users')) {
@@ -8561,13 +8874,23 @@ var _setSiteSecurityREST = function (server, name, signin, access, addUserNames,
 
 					var removeAccessPromises = [];
 					if (accessValues.includes('named')) {
-						for (var i = 0; i < users.length; i++) {
+						for (let i = 0; i < users.length; i++) {
 							if (users[i].action === 'delete') {
 								removeAccessPromises.push(sitesRest.removeSiteAccess({
 									server: server,
 									id: siteId,
 									name: name,
 									member: 'user:' + users[i].loginName
+								}));
+							}
+						}
+						for (let i = 0; i < groups.length; i++) {
+							if (groups[i].action === 'delete') {
+								removeAccessPromises.push(sitesRest.removeSiteAccess({
+									server: server,
+									id: siteId,
+									name: name,
+									member: 'group:' + groups[i].name
 								}));
 							}
 						}
@@ -8578,13 +8901,23 @@ var _setSiteSecurityREST = function (server, name, signin, access, addUserNames,
 
 					var grantAccessPromises = [];
 					if (accessValues.includes('named')) {
-						for (var i = 0; i < users.length; i++) {
+						for (let i = 0; i < users.length; i++) {
 							if (users[i].action === 'add') {
 								grantAccessPromises.push(sitesRest.grantSiteAccess({
 									server: server,
 									id: siteId,
 									name: name,
 									member: 'user:' + users[i].loginName
+								}));
+							}
+						}
+						for (let i = 0; i < groups.length; i++) {
+							if (groups[i].action === 'add') {
+								grantAccessPromises.push(sitesRest.grantSiteAccess({
+									server: server,
+									id: siteId,
+									name: name,
+									member: 'group:' + groups[i].name
 								}));
 							}
 						}
@@ -8937,7 +9270,7 @@ var _zipStaticFiles = function (folderPath, zipFileName) {
 	return new Promise(function (resolve, reject) {
 		//
 		// create the zip file
-		// 
+		//
 		gulp.src(folderPath + '/**', {
 			base: folderPath
 		})
@@ -9656,13 +9989,13 @@ module.exports.migrateSite = function (argv, done) {
 				});
 			})
 			.then(function (result) {
-				_cmdEnd(done, true);
+				done(true);
 			})
 			.catch((error) => {
 				if (error) {
 					console.error(error);
 				}
-				_cmdEnd(done);
+				done();
 			});
 	});
 };
@@ -9823,8 +10156,8 @@ var _refreshPrerenderCache = function (urls) {
 
 			});
 		},
-			// Start with a previousPromise value that is a resolved promise 
-			Promise.resolve({}));
+		// Start with a previousPromise value that is a resolved promise
+		Promise.resolve({}));
 
 		doSendUrl.then(function (result) {
 			resolve({});
@@ -9889,7 +10222,6 @@ module.exports.compileSite = function (argv, done) {
 
 	console.info(jobParams);
 
-
 	var persistenceStore = require('../test/job-manager/sampleFilePersistenceStore.js');
 	var ps = persistenceStore();
 	var jobManager = require('../test/job-manager/jobManager.js');
@@ -9903,10 +10235,10 @@ module.exports.compileSite = function (argv, done) {
 		// we start from CREATE_TEMPLATE for compiling the site
 		return jm.updateStatus(config, "CREATE_TEMPLATE").then(function (updatedConfig) {
 			return jm.compileJob(updatedConfig).then(function (result) {
-				_cmdEnd(done, true);
+				done(true);
 			});
 		});
 	}).catch(function (e) {
-		_cmdEnd(done);
+		done();
 	});
 };

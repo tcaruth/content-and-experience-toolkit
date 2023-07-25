@@ -14,6 +14,7 @@
  *
  * $Id: component-registration.js 166785 2019-01-10 18:46:18Z muralik $
  */
+// eslint-disable-next-line no-redeclare
 /* global exports */
 (function defineComponentRegistration(scope, factory) {
 	// configure to run in various JS environments
@@ -591,6 +592,7 @@
 						'fontColorHover': '#2222DD',
 						'fontFamily': '\'Helvetica Neue\', Helvetica, Arial, sans-serif',
 						'fontSize': 14,
+						'constraints': [],
 						'height': 0,
 						'linkType': 'scs-link-no-link',
 						'marginBottom': 5,
@@ -613,6 +615,7 @@
 						'borderRadius',
 						'borderStyle',
 						'borderWidth',
+						'constraints',
 						'fontColor',
 						'fontColorHover',
 						'fontFamily',
@@ -1352,6 +1355,9 @@
 						'visible',
 						'visibleOnMobile'
 					],
+					'asynchronousUpdateProperties': [
+						'backgroundImageName'
+					],
 					'fileReferenceProperties': [{
 						'propName': 'backgroundImage',
 						'propType': 'string'
@@ -1384,9 +1390,14 @@
 					'properties': [
 						'visible',
 						'visibleOnMobile',
+						'contentId',
+						'contentIds',
+						'contentViewing',
+						'contentViewings',
 						'backgroundAttachment',
 						'backgroundColor',
 						'backgroundImage',
+						'backgroundImageName',
 						'backgroundPosition',
 						'backgroundRepeat',
 						'backgroundSize',
@@ -1399,7 +1410,8 @@
 					],
 					'instanceProperties': [
 						'visible',
-						'visibleOnMobile'
+						'visibleOnMobile',
+						'backgroundImageName'
 					],
 					'fileReferenceProperties': [{
 						'propName': 'backgroundImage',
@@ -1432,9 +1444,14 @@
 						'visible': true
 					},
 					'properties': [
+						'contentId',
+						'contentIds',
+						'contentViewing',
+						'contentViewings',
 						'backgroundAttachment',
 						'backgroundColor',
 						'backgroundImage',
+						'backgroundImageName',
 						'backgroundPosition',
 						'backgroundRepeat',
 						'backgroundSize',
@@ -1454,11 +1471,12 @@
 					'instanceProperties': [
 						'nestedComponents',
 						'componentFactory',
-
+						'backgroundImageName',
 						'visible',
 						'visibleOnMobile'
 					],
 					'asynchronousUpdateProperties': [
+						'backgroundImageName',
 						'nestedComponents'
 					],
 					'dataProperties': [{
